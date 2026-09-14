@@ -3,9 +3,33 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import { db, auth, googleProvider } from "./firebase";
 import {
-  Search, Plus, Star, Link2, Image as ImageIcon, Calendar,
-  Trash2, Pencil, X, Check, BookOpen, Menu, AlertCircle, LogOut
+  Search, Plus, Star, Link2, Calendar,
+  Trash2, Pencil, X, Check, BookOpen, Menu, AlertCircle, LogOut, Upload
 } from "lucide-react";
+
+// Сжимает выбранное фото и превращает в data URL, чтобы хранить
+// прямо в Firestore без платного Firebase Storage.
+function compressImageFile(file, maxWidth = 900, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("read failed"));
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("image failed"));
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
 
 function GoogleIcon() {
   return (
@@ -411,9 +435,13 @@ export default function App() {
                         target="_blank"
                         rel="noreferrer"
                         className="attachment-chip"
-                        title={a.url}
+                        title={a.label || a.url}
                       >
-                        {a.type === "image" ? <ImageIcon size={12} strokeWidth={1.75} /> : <Link2 size={12} strokeWidth={1.75} />}
+                        {a.type === "image" ? (
+                          <img src={a.url} alt="" className="attachment-thumb" />
+                        ) : (
+                          <Link2 size={12} strokeWidth={1.75} />
+                        )}
                         {a.label || (a.type === "image" ? "Фото" : "Ссылка")}
                       </a>
                     ))}
@@ -555,6 +583,8 @@ function TaskForm({ task, subjects, onClose, onSave }) {
   const [attType, setAttType] = useState("link");
   const [attUrl, setAttUrl] = useState("");
   const [attLabel, setAttLabel] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -566,6 +596,25 @@ function TaskForm({ task, subjects, onClose, onSave }) {
     ]);
     setAttUrl("");
     setAttLabel("");
+  }
+  async function handlePhotoPick(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // чтобы можно было выбрать тот же файл ещё раз
+    if (!file) return;
+    setUploadError(null);
+    setUploading(true);
+    try {
+      const dataUrl = await compressImageFile(file);
+      set("attachments", [
+        ...(form.attachments || []),
+        { id: uid(), type: "image", url: dataUrl, label: attLabel.trim() || file.name },
+      ]);
+      setAttLabel("");
+    } catch (err) {
+      setUploadError("Не получилось обработать фото — попробуйте другой файл");
+    } finally {
+      setUploading(false);
+    }
   }
   function removeAttachment(id) {
     set("attachments", form.attachments.filter((a) => a.id !== id));
@@ -637,7 +686,11 @@ function TaskForm({ task, subjects, onClose, onSave }) {
           <div className="attachments" style={{ marginBottom: 8 }}>
             {form.attachments.map((a) => (
               <span key={a.id} className="attachment-chip removable">
-                {a.type === "image" ? <ImageIcon size={12} strokeWidth={1.75} /> : <Link2 size={12} strokeWidth={1.75} />}
+                {a.type === "image" ? (
+                  <img src={a.url} alt="" className="attachment-thumb" />
+                ) : (
+                  <Link2 size={12} strokeWidth={1.75} />
+                )}
                 {a.label || a.url.slice(0, 24)}
                 <X size={12} strokeWidth={2} onClick={() => removeAttachment(a.id)} />
               </span>
@@ -647,24 +700,46 @@ function TaskForm({ task, subjects, onClose, onSave }) {
         <div className="attach-form">
           <select className="text-input small" value={attType} onChange={(e) => setAttType(e.target.value)}>
             <option value="link">Ссылка</option>
-            <option value="image">Фото (URL)</option>
+            <option value="image">Фото</option>
           </select>
-          <input
-            className="text-input"
-            placeholder="https://…"
-            value={attUrl}
-            onChange={(e) => setAttUrl(e.target.value)}
-          />
-          <input
-            className="text-input small"
-            placeholder="Подпись"
-            value={attLabel}
-            onChange={(e) => setAttLabel(e.target.value)}
-          />
-          <button className="ghost-btn" onClick={addAttachment}>
-            <Plus size={14} strokeWidth={2} />
-          </button>
+          {attType === "link" ? (
+            <>
+              <input
+                className="text-input"
+                placeholder="https://…"
+                value={attUrl}
+                onChange={(e) => setAttUrl(e.target.value)}
+              />
+              <input
+                className="text-input small"
+                placeholder="Подпись"
+                value={attLabel}
+                onChange={(e) => setAttLabel(e.target.value)}
+              />
+              <button className="ghost-btn" onClick={addAttachment}>
+                <Plus size={14} strokeWidth={2} />
+              </button>
+            </>
+          ) : (
+            <>
+              <input
+                className="text-input"
+                placeholder="Подпись (необязательно)"
+                value={attLabel}
+                onChange={(e) => setAttLabel(e.target.value)}
+              />
+              <label className={"ghost-btn file-picker" + (uploading ? " disabled" : "")}>
+                {uploading ? "Обработка…" : (<><Upload size={14} strokeWidth={2} /> Выбрать фото</>)}
+                <input type="file" accept="image/*" disabled={uploading} onChange={handlePhotoPick} />
+              </label>
+            </>
+          )}
         </div>
+        {uploadError && (
+          <div className="save-error" style={{ marginTop: 6 }}>
+            <AlertCircle size={13} strokeWidth={1.75} /> {uploadError}
+          </div>
+        )}
 
         <label className="checkbox-row">
           <input type="checkbox" checked={form.favorite} onChange={(e) => set("favorite", e.target.checked)} />
@@ -718,11 +793,11 @@ const CSS = `
   .search-box input::placeholder { color: var(--text-faint); }
 
   .nav-list { display:flex; flex-direction:column; gap:2px; margin-bottom: 18px; }
-  .section-label { font-size: 12px; color: var(--text-faint); padding: 0 8px; margin-bottom: 6px; }
+  .section-label { font-size: 11px; letter-spacing: 0.04em; color: var(--text-faint); padding: 0 8px; margin-bottom: 8px; text-transform: uppercase; }
   .subject-list { display:flex; flex-direction:column; gap:2px; flex: 1; overflow-y:auto; }
   .empty-hint { color: var(--text-faint); font-size: 13px; padding: 8px; }
 
-  .nav-item { display:flex; align-items:center; gap:9px; background:none; border:none; color: var(--text-dim); padding: 8px 8px; border-radius: 7px; cursor:pointer; text-align:left; font-size: 13.5px; font-family: ${SANS}; position: relative; }
+  .nav-item { display:flex; align-items:center; gap:9px; background:none; border:none; color: var(--text-dim); padding: 8px 8px; border-radius: 7px; cursor:pointer; text-align:left; font-size: 13.5px; font-family: ${SANS}; position: relative; transition: background-color 0.15s ease, color 0.15s ease; }
   .nav-item:hover { background: var(--surface-hover); color: var(--text); }
   .nav-item.active { background: var(--surface); color: var(--text); }
   .nav-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink:0; }
@@ -751,16 +826,17 @@ const CSS = `
   .google-btn:hover { filter: brightness(0.97); }
 
   .main { flex: 1; display:flex; flex-direction:column; overflow-y:auto; padding: 24px 32px 40px; }
-  .topbar { display:flex; align-items:center; gap: 14px; margin-bottom: 6px; }
+  .topbar { display:flex; align-items:center; gap: 14px; padding-bottom: 18px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
   .menu-btn { display:none; background:none; border:none; color: var(--text-dim); cursor:pointer; }
   .topbar h1 { font-family: ${SERIF}; font-weight: 400; font-size: 26px; margin: 0; flex: 1; color: var(--text); }
 
-  .primary-btn { display:flex; align-items:center; gap:6px; background: var(--accent); color: #1c140a; border: none; padding: 9px 15px; border-radius: 8px; font-size: 13.5px; font-weight: 600; cursor:pointer; font-family: ${SANS}; }
+  .primary-btn { display:flex; align-items:center; gap:6px; background: var(--accent); color: #1c140a; border: none; padding: 9px 15px; border-radius: 8px; font-size: 13.5px; font-weight: 600; cursor:pointer; font-family: ${SANS}; transition: filter 0.15s ease, transform 0.1s ease; }
   .primary-btn:hover { filter: brightness(1.08); }
+  .primary-btn:active { transform: scale(0.97); }
   .primary-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .filter-row { display:flex; gap:8px; flex-wrap:wrap; margin: 16px 0 20px; }
-  .chip { background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); padding: 6px 12px; border-radius: 999px; font-size: 12.5px; cursor:pointer; font-family: ${SANS}; }
+  .chip { background: transparent; border: 1px solid var(--border); color: var(--text-faint); padding: 5px 12px; border-radius: 999px; font-size: 12px; cursor:pointer; font-family: ${SANS}; transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease; }
   .chip:hover { color: var(--text); border-color: var(--text-faint); }
   .chip-active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
@@ -770,20 +846,26 @@ const CSS = `
   .empty-state { text-align:center; color: var(--text-faint); padding: 60px 20px; display:flex; flex-direction:column; align-items:center; gap: 10px; }
   .empty-state p { max-width: 340px; margin: 0; font-size: 13.5px; }
 
-  .task-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; }
-  .task-card.overdue { border-color: rgba(209,112,106,0.4); }
+  .task-card { background: var(--surface); border: 1px solid transparent; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 20px -16px rgba(0,0,0,0.5); transition: border-color 0.15s ease; }
+  .task-card:hover { border-color: var(--border); }
+  .task-card.overdue { border-color: rgba(209,112,106,0.35); }
   .task-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 8px; }
   .subject-chip { font-size: 11.5px; color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent); padding: 3px 9px; border-radius: 999px; font-weight: 600; }
   .star-btn { background:none; border:none; cursor:pointer; padding: 2px; display:flex; }
 
-  .task-title { font-family: ${SERIF}; font-weight: 400; font-size: 17px; margin: 0 0 4px; color: var(--text); }
-  .task-desc { font-size: 13px; color: var(--text-dim); margin: 0 0 10px; line-height: 1.5; }
+  .task-title { font-family: ${SERIF}; font-weight: 400; font-size: 17.5px; margin: 0 0 5px; color: var(--text); letter-spacing: 0.1px; }
+  .task-desc { font-size: 13px; color: var(--text-faint); margin: 0 0 12px; line-height: 1.55; }
 
   .attachments { display:flex; flex-wrap:wrap; gap:6px; margin-bottom: 10px; }
-  .attachment-chip { display:inline-flex; align-items:center; gap:5px; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim); font-size: 11.5px; padding: 4px 9px; border-radius: 7px; text-decoration:none; }
+  .attachment-chip { display:inline-flex; align-items:center; gap:5px; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim); font-size: 11.5px; padding: 4px 9px 4px 5px; border-radius: 7px; text-decoration:none; transition: color 0.15s ease, border-color 0.15s ease; }
   .attachment-chip:hover { color: var(--text); border-color: var(--text-faint); }
   .attachment-chip.removable { cursor: default; }
   .attachment-chip svg:last-child { cursor: pointer; margin-left: 2px; }
+  .attachment-thumb { width: 16px; height: 16px; border-radius: 4px; object-fit: cover; flex-shrink: 0; }
+
+  .file-picker { position: relative; overflow: hidden; cursor: pointer; }
+  .file-picker input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .file-picker.disabled { opacity: 0.6; pointer-events: none; }
 
   .task-bottom { display:flex; align-items:center; gap: 10px; flex-wrap: wrap; }
   .status-badge { font-size: 11.5px; font-weight: 600; color: var(--sc); background: color-mix(in srgb, var(--sc) 16%, transparent); padding: 4px 10px; border-radius: 999px; }
@@ -800,8 +882,8 @@ const CSS = `
   .modal-head { display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px; }
   .modal-head h2 { font-family: ${SERIF}; font-weight:400; font-size: 19px; margin:0; }
 
-  .field-label { display:block; font-size: 12px; color: var(--text-faint); margin: 12px 0 6px; }
-  .text-input { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 9px 11px; border-radius: 8px; font-size: 13.5px; outline: none; font-family: ${SANS}; }
+  .field-label { display:block; font-size: 11px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-faint); margin: 14px 0 7px; }
+  .text-input { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 9px 11px; border-radius: 8px; font-size: 13.5px; outline: none; font-family: ${SANS}; transition: border-color 0.15s ease; }
   .text-input:focus { border-color: var(--accent); }
   .text-input.small { flex: 0 0 auto; width: auto; }
   .textarea { resize: vertical; font-family: ${SANS}; }
@@ -819,7 +901,7 @@ const CSS = `
   .checkbox-row { display:flex; align-items:center; gap: 8px; margin-top: 16px; font-size: 13px; color: var(--text-dim); cursor: pointer; }
 
   .modal-actions { display:flex; justify-content:flex-end; gap: 10px; margin-top: 20px; }
-  .ghost-btn { background:none; border: 1px solid var(--border); color: var(--text-dim); padding: 8px 14px; border-radius: 8px; cursor:pointer; font-size: 13px; font-family: ${SANS}; display:flex; align-items:center; gap:6px; }
+  .ghost-btn { background:none; border: 1px solid var(--border); color: var(--text-dim); padding: 8px 14px; border-radius: 8px; cursor:pointer; font-size: 13px; font-family: ${SANS}; display:flex; align-items:center; gap:6px; transition: color 0.15s ease, border-color 0.15s ease; }
   .ghost-btn:hover { color: var(--text); border-color: var(--text-faint); }
   .danger-btn { background: var(--red); color: #1c0a0a; border:none; padding: 8px 14px; border-radius: 8px; cursor:pointer; font-size: 13px; font-weight:600; font-family: ${SANS}; }
   .confirm-box { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 340px; max-width: 100%; }
