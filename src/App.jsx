@@ -1,10 +1,22 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { doc, getDoc, setDoc } from "firebase/firestore";
-import { db } from "./firebase";
+import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { db, auth, googleProvider } from "./firebase";
 import {
   Search, Plus, Star, Link2, Image as ImageIcon, Calendar,
-  Trash2, Pencil, X, Check, BookOpen, Menu, AlertCircle, Copy, CheckCheck
+  Trash2, Pencil, X, Check, BookOpen, Menu, AlertCircle, LogOut
 } from "lucide-react";
+
+function GoogleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 48 48">
+      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/>
+      <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.5 6.1 29.6 4 24 4c-7.5 0-14 4.2-17.7 10.7z"/>
+      <path fill="#4CAF50" d="M24 44c5.5 0 10.4-1.9 14.2-5.1l-6.6-5.4C29.6 35.2 26.9 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.6 5.1C9.9 39.7 16.4 44 24 44z"/>
+      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.2-4.1 5.5l6.6 5.4C40.9 36.5 44 30.8 44 24c0-1.3-.1-2.7-.4-3.5z"/>
+    </svg>
+  );
+}
 
 const STATUSES = [
   { id: "not_started", label: "Не начато", color: "var(--grey)" },
@@ -36,24 +48,13 @@ function formatDate(dateStr) {
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
 }
 
-// У каждой ссылки на сайт есть свой "?group=..." — все, кто открыл
-// одну и ту же ссылку, видят и редактируют один и тот же список.
-function getOrCreateGroupId() {
-  const params = new URLSearchParams(window.location.search);
-  let g = params.get("group");
-  if (!g) {
-    g = uid() + uid();
-    params.set("group", g);
-    window.history.replaceState({}, "", `${window.location.pathname}?${params.toString()}`);
-  }
-  return g;
-}
-
 export default function App() {
-  const [groupId] = useState(getOrCreateGroupId);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [user, setUser] = useState(null);
+  const [authError, setAuthError] = useState(null);
+
   const [loaded, setLoaded] = useState(false);
   const [saveError, setSaveError] = useState(null);
-  const [linkCopied, setLinkCopied] = useState(false);
   const [subjects, setSubjects] = useState([]);
   const [tasks, setTasks] = useState([]);
 
@@ -69,28 +70,56 @@ export default function App() {
   const firstLoad = useRef(true);
   const saveTimer = useRef(null);
 
-  // Загрузка данных группы из Firestore при открытии сайта
+  // Следим за состоянием входа
   useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthChecked(true);
+      // при смене пользователя (вход/выход) сбрасываем локальные данные
+      // и разрешаем заново загрузить их для нового аккаунта
+      firstLoad.current = true;
+      setLoaded(false);
+      setSubjects([]);
+      setTasks([]);
+    });
+    return () => unsub();
+  }, []);
+
+  async function handleSignIn() {
+    setAuthError(null);
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (e) {
+      setAuthError("Не удалось войти — попробуйте ещё раз");
+    }
+  }
+  function handleSignOut() {
+    signOut(auth);
+  }
+
+  // Загрузка личных данных пользователя из Firestore
+  useEffect(() => {
+    if (!user) return;
     (async () => {
       try {
-        const snap = await getDoc(doc(db, "homework-groups", groupId));
+        const snap = await getDoc(doc(db, "homework-users", user.uid));
         if (snap.exists()) {
           const data = snap.data();
           setSubjects(data.subjects || []);
           setTasks(data.tasks || []);
         }
       } catch (e) {
-        setSaveError("Не удалось загрузить данные — проверьте ключи Firebase и подключение");
+        setSaveError("Не удалось загрузить данные — проверьте ключи Firebase и правила доступа");
       } finally {
         setLoaded(true);
       }
     })();
-  }, [groupId]);
+  }, [user]);
 
   // Сохранение в Firestore при любом изменении (с небольшой задержкой,
   // чтобы не писать в базу на каждую букву при вводе текста)
   useEffect(() => {
-    if (!loaded) return;
+    if (!loaded || !user) return;
     if (firstLoad.current) {
       firstLoad.current = false;
       return;
@@ -98,21 +127,14 @@ export default function App() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       try {
-        await setDoc(doc(db, "homework-groups", groupId), { subjects, tasks }, { merge: true });
+        await setDoc(doc(db, "homework-users", user.uid), { subjects, tasks }, { merge: true });
         setSaveError(null);
       } catch (e) {
         setSaveError("Не удалось сохранить изменения");
       }
     }, 500);
     return () => clearTimeout(saveTimer.current);
-  }, [subjects, tasks, loaded, groupId]);
-
-  function copyLink() {
-    navigator.clipboard.writeText(window.location.href).then(() => {
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
-    });
-  }
+  }, [subjects, tasks, loaded, user]);
 
   const filteredSubjects = useMemo(() => {
     if (!query.trim()) return subjects;
@@ -167,6 +189,35 @@ export default function App() {
   }
 
   const taskCount = (subjectId) => tasks.filter((t) => t.subjectId === subjectId).length;
+
+  if (!authChecked) {
+    return (
+      <div style={{ ...styleVars, background: "var(--bg)", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontFamily: SANS }}>
+        Загружаю…
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div style={styleVars} className="login-screen">
+        <style>{CSS}</style>
+        <div className="login-card">
+          <BookOpen size={30} strokeWidth={1.5} />
+          <h1>Дневник заданий</h1>
+          <p>Личный список домашних заданий — виден только вам, пока вы не поделитесь входом сами.</p>
+          <button className="google-btn" onClick={handleSignIn}>
+            <GoogleIcon /> Войти через Google
+          </button>
+          {authError && (
+            <div className="save-error" style={{ marginTop: 12 }}>
+              <AlertCircle size={14} strokeWidth={1.75} /> {authError}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!loaded) {
     return (
@@ -248,10 +299,17 @@ export default function App() {
           Добавить предмет
         </button>
 
-        <button className="share-btn" onClick={copyLink}>
-          {linkCopied ? <CheckCheck size={14} strokeWidth={1.75} /> : <Copy size={14} strokeWidth={1.75} />}
-          {linkCopied ? "Ссылка скопирована" : "Скопировать ссылку доступа"}
-        </button>
+        <div className="user-row">
+          {user.photoURL ? (
+            <img src={user.photoURL} alt="" className="user-avatar" />
+          ) : (
+            <div className="user-avatar user-avatar-fallback">{(user.displayName || user.email || "?")[0]}</div>
+          )}
+          <span className="user-name">{user.displayName || user.email}</span>
+          <button className="icon-btn" onClick={handleSignOut} title="Выйти">
+            <LogOut size={15} strokeWidth={1.75} />
+          </button>
+        </div>
       </aside>
 
       <main className="main">
@@ -679,8 +737,18 @@ const CSS = `
   .add-subject-btn { display:flex; align-items:center; justify-content:center; gap:6px; background:none; border: 1px dashed var(--border); color: var(--text-dim); padding: 9px; border-radius: 8px; cursor:pointer; font-size: 13px; margin-top: 10px; font-family: ${SANS}; }
   .add-subject-btn:hover { border-color: var(--accent); color: var(--accent); }
 
-  .share-btn { display:flex; align-items:center; justify-content:center; gap:6px; background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); padding: 9px; border-radius: 8px; cursor:pointer; font-size: 12.5px; margin-top: 8px; font-family: ${SANS}; }
-  .share-btn:hover { color: var(--text); border-color: var(--text-faint); }
+  .user-row { display:flex; align-items:center; gap:8px; margin-top: 10px; padding: 8px; border-top: 1px solid var(--border); }
+  .user-avatar { width: 26px; height: 26px; border-radius: 50%; object-fit: cover; flex-shrink: 0; }
+  .user-avatar-fallback { display:flex; align-items:center; justify-content:center; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 600; text-transform: uppercase; }
+  .user-name { flex: 1; font-size: 12.5px; color: var(--text-dim); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  .login-screen { min-height: 100vh; display:flex; align-items:center; justify-content:center; background: var(--bg); color: var(--text); font-family: ${SANS}; padding: 20px; }
+  .login-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 16px; padding: 40px 32px; width: 360px; max-width: 100%; text-align: center; display:flex; flex-direction:column; align-items:center; gap: 10px; }
+  .login-card svg:first-child { color: var(--accent); margin-bottom: 4px; }
+  .login-card h1 { font-family: ${SERIF}; font-weight: 400; font-size: 24px; margin: 0; }
+  .login-card p { font-size: 13px; color: var(--text-dim); line-height: 1.5; margin: 0 0 14px; }
+  .google-btn { display:flex; align-items:center; justify-content:center; gap:10px; width: 100%; background: #fff; color: #1f1f1f; border: none; padding: 11px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor:pointer; font-family: ${SANS}; }
+  .google-btn:hover { filter: brightness(0.97); }
 
   .main { flex: 1; display:flex; flex-direction:column; overflow-y:auto; padding: 24px 32px 40px; }
   .topbar { display:flex; align-items:center; gap: 14px; margin-bottom: 6px; }
