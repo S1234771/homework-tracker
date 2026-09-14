@@ -4,12 +4,12 @@ import { getFirestore } from "firebase/firestore";
 // Вставьте сюда объект firebaseConfig из консоли Firebase:
 // Project settings → General → "Your apps" → веб-приложение → SDK setup and configuration
 const firebaseConfig = {
-  apiKey: "ВАШ_API_KEY",
-  authDomain: "ВАШ_ПРОЕКТ.firebaseapp.com",
-  projectId: "ВАШ_ПРОЕКТ_ID",
-  storageBucket: "ВАШ_ПРОЕКТ.appspot.com",
-  messagingSenderId: "ВАШ_SENDER_ID",
-  appId: "ВАШ_APP_ID",
+  apiKey: "AIzaSyApdTz7AJEPH6UmooUOCUfFoy5HTY1rmw4",
+  authDomain: "homework-traker-7ac6b.firebaseapp.com",
+  projectId: "homework-traker-7ac6b",
+  storageBucket: "homework-traker-7ac6b.firebasestorage.app",
+  messagingSenderId: "1090898216482",
+  appId: "1:1090898216482:web:e2d7f6bb313e0008d36c7b",
 };
 
 export const app = initializeApp(firebaseConfig);
