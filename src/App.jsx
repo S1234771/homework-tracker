@@ -464,12 +464,13 @@ export default function App() {
                 className={"task-card" + (overdue ? " overdue" : "")}
                 key={t.id}
                 style={{ animationDelay: `${Math.min(idx, 8) * 35}ms` }}
+                onClick={() => setViewingTask(t)}
               >
                 <div className="task-top">
                   <span className="subject-chip" style={{ "--c": subj?.color || "#888" }}>
                     {subj?.name || "Без предмета"}
                   </span>
-                  <button className="star-btn" onClick={() => toggleFavorite(t.id)}>
+                  <button className="star-btn" onClick={(e) => { e.stopPropagation(); toggleFavorite(t.id); }}>
                     <Star
                       size={16}
                       strokeWidth={1.75}
@@ -479,9 +480,7 @@ export default function App() {
                   </button>
                 </div>
 
-                <h3 className="task-title task-title-link" onClick={() => setViewingTask(t)}>
-                  {t.title}
-                </h3>
+                <h3 className="task-title">{t.title}</h3>
                 {t.description && <p className="task-desc">{t.description}</p>}
 
                 {t.attachments?.length > 0 && (
@@ -495,6 +494,7 @@ export default function App() {
                         download={a.type === "file" ? (a.label || "файл") : undefined}
                         className="attachment-chip"
                         title={a.label || (a.type === "link" ? a.url : "")}
+                        onClick={(e) => e.stopPropagation()}
                       >
                         {a.type === "image" ? (
                           <img src={a.url} alt="" className="attachment-thumb" />
@@ -510,19 +510,19 @@ export default function App() {
                 )}
 
                 <div className="task-bottom">
-                  <div className="status-row">
-                    {STATUSES.map((s) => (
-                      <button
-                        key={s.id}
-                        className={"status-dot" + (t.status === s.id ? " status-dot-active" : "")}
-                        style={{ "--sc": s.color }}
-                        title={s.label}
-                        onClick={() => setTaskStatus(t.id, s.id)}
-                      >
-                        <s.Icon size={12} strokeWidth={2.25} />
-                      </button>
-                    ))}
-                  </div>
+                  <button
+                    className="status-cycle"
+                    style={{ "--sc": st.color }}
+                    title={`Статус: ${st.label} (нажмите, чтобы изменить)`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const i = STATUSES.findIndex((s) => s.id === t.status);
+                      setTaskStatus(t.id, STATUSES[(i + 1) % STATUSES.length].id);
+                    }}
+                  >
+                    <st.Icon size={12} strokeWidth={2.25} />
+                    {st.label}
+                  </button>
                   {t.deadline && (
                     <span className={"deadline" + (overdue ? " deadline-over" : soon ? " deadline-soon" : "")}>
                       <Calendar size={12} strokeWidth={1.75} />
@@ -533,12 +533,12 @@ export default function App() {
                     </span>
                   )}
                   <span className="spacer" />
-                  <button className="icon-btn" onClick={() => setEditingTask(t)}>
+                  <button className="icon-btn" onClick={(e) => { e.stopPropagation(); setEditingTask(t); }}>
                     <Pencil size={14} strokeWidth={1.75} />
                   </button>
                   <button
                     className="icon-btn"
-                    onClick={() => setConfirmDelete({ type: "task", id: t.id, name: t.title })}
+                    onClick={(e) => { e.stopPropagation(); setConfirmDelete({ type: "task", id: t.id, name: t.title }); }}
                   >
                     <Trash2 size={14} strokeWidth={1.75} />
                   </button>
@@ -982,35 +982,35 @@ const styleVars = {
 
 const CSS = `
   * { box-sizing: border-box; }
-  .app { display: flex; height: 100vh; background: var(--bg); color: var(--text); font-family: ${SANS}; font-size: 14px; }
+  .app { display: flex; height: 100vh; background: var(--bg); color: var(--text); font-family: ${SANS}; font-size: 15px; }
   .scrim { display:none; }
 
   .sidebar { width: 270px; flex-shrink: 0; background: var(--bg-elevated); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px 14px; overflow-y: auto; }
-  .brand { display:flex; align-items:center; gap:8px; font-family: ${SERIF}; font-size: 19px; color: var(--text); margin-bottom: 18px; padding: 0 4px; }
+  .brand { display:flex; align-items:center; gap:8px; font-family: ${SERIF}; font-size: 20px; color: var(--text); margin-bottom: 18px; padding: 0 4px; }
   .brand svg { color: var(--accent); }
 
   .search-box { display:flex; align-items:center; gap:8px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 16px; color: var(--text-faint); }
-  .search-box input { background: none; border: none; outline: none; color: var(--text); font-size: 13px; width: 100%; font-family: ${SANS}; }
+  .search-box input { background: none; border: none; outline: none; color: var(--text); font-size: 14px; width: 100%; font-family: ${SANS}; }
   .search-box input::placeholder { color: var(--text-faint); }
 
   .nav-list { display:flex; flex-direction:column; gap:2px; margin-bottom: 18px; }
-  .section-label { font-size: 11px; letter-spacing: 0.04em; color: var(--text-faint); padding: 0 8px; margin-bottom: 8px; text-transform: uppercase; }
+  .section-label { font-size: 11.5px; letter-spacing: 0.04em; color: var(--text-faint); padding: 0 8px; margin-bottom: 8px; text-transform: uppercase; }
   .subject-list { display:flex; flex-direction:column; gap:2px; flex: 1; overflow-y:auto; }
-  .empty-hint { color: var(--text-faint); font-size: 13px; padding: 8px; }
+  .empty-hint { color: var(--text-faint); font-size: 14px; padding: 8px; }
 
-  .nav-item { display:flex; align-items:center; gap:9px; background:none; border:none; color: var(--text-dim); padding: 8px 8px; border-radius: 7px; cursor:pointer; text-align:left; font-size: 13.5px; font-family: ${SANS}; position: relative; transition: background-color 0.15s ease, color 0.15s ease; }
+  .nav-item { display:flex; align-items:center; gap:9px; background:none; border:none; color: var(--text-dim); padding: 8px 8px; border-radius: 7px; cursor:pointer; text-align:left; font-size: 14.5px; font-family: ${SANS}; position: relative; transition: background-color 0.15s ease, color 0.15s ease; }
   .nav-item:hover { background: var(--surface-hover); color: var(--text); }
   .nav-item.active { background: var(--surface); color: var(--text); }
   .nav-item .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink:0; }
   .nav-item .all-dot { background: var(--text-faint); }
   .nav-item .star-icon { color: var(--accent); flex-shrink:0; }
   .subject-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .nav-item .count { font-size: 11px; color: var(--text-faint); }
+  .nav-item .count { font-size: 11.5px; color: var(--text-faint); }
   .nav-item:hover .row-delete { display:flex; }
   .row-delete { display:none; align-items:center; color: var(--text-faint); padding: 2px; border-radius: 4px; }
   .row-delete:hover { color: var(--red); background: rgba(209,112,106,0.12); }
 
-  .add-subject-btn { display:flex; align-items:center; justify-content:center; gap:6px; background:none; border: 1px dashed var(--border); color: var(--text-dim); padding: 9px; border-radius: 8px; cursor:pointer; font-size: 13px; margin-top: 10px; font-family: ${SANS}; }
+  .add-subject-btn { display:flex; align-items:center; justify-content:center; gap:6px; background:none; border: 1px dashed var(--border); color: var(--text-dim); padding: 9px; border-radius: 8px; cursor:pointer; font-size: 14px; margin-top: 10px; font-family: ${SANS}; }
   .add-subject-btn:hover { border-color: var(--accent); color: var(--accent); }
 
   .user-row { display:flex; align-items:center; gap:8px; margin-top: 10px; padding: 8px; border-top: 1px solid var(--border); }
@@ -1021,23 +1021,23 @@ const CSS = `
   .login-screen { min-height: 100vh; display:flex; align-items:center; justify-content:center; background: var(--bg); color: var(--text); font-family: ${SANS}; padding: 20px; }
   .login-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 16px; padding: 40px 32px; width: 360px; max-width: 100%; text-align: center; display:flex; flex-direction:column; align-items:center; gap: 10px; }
   .login-card svg:first-child { color: var(--accent); margin-bottom: 4px; }
-  .login-card h1 { font-family: ${SERIF}; font-weight: 400; font-size: 24px; margin: 0; }
-  .login-card p { font-size: 13px; color: var(--text-dim); line-height: 1.5; margin: 0 0 14px; }
-  .google-btn { display:flex; align-items:center; justify-content:center; gap:10px; width: 100%; background: #fff; color: #1f1f1f; border: none; padding: 11px; border-radius: 8px; font-size: 14px; font-weight: 600; cursor:pointer; font-family: ${SANS}; }
+  .login-card h1 { font-family: ${SERIF}; font-weight: 400; font-size: 26px; margin: 0; }
+  .login-card p { font-size: 14px; color: var(--text-dim); line-height: 1.5; margin: 0 0 14px; }
+  .google-btn { display:flex; align-items:center; justify-content:center; gap:10px; width: 100%; background: #fff; color: #1f1f1f; border: none; padding: 11px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor:pointer; font-family: ${SANS}; }
   .google-btn:hover { filter: brightness(0.97); }
 
   .main { flex: 1; display:flex; flex-direction:column; overflow-y:auto; padding: 24px 32px 40px; }
   .topbar { display:flex; align-items:center; gap: 14px; padding-bottom: 18px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
   .menu-btn { display:none; background:none; border:none; color: var(--text-dim); cursor:pointer; }
-  .topbar h1 { font-family: ${SERIF}; font-weight: 400; font-size: 26px; margin: 0; flex: 1; color: var(--text); }
+  .topbar h1 { font-family: ${SERIF}; font-weight: 400; font-size: 28px; margin: 0; flex: 1; color: var(--text); }
 
-  .primary-btn { display:flex; align-items:center; gap:6px; background: var(--accent); color: #1c140a; border: none; padding: 9px 15px; border-radius: 8px; font-size: 13.5px; font-weight: 600; cursor:pointer; font-family: ${SANS}; transition: filter 0.15s ease, transform 0.1s ease; }
+  .primary-btn { display:flex; align-items:center; gap:6px; background: var(--accent); color: #1c140a; border: none; padding: 9px 16px; border-radius: 8px; font-size: 14.5px; font-weight: 600; cursor:pointer; font-family: ${SANS}; transition: filter 0.15s ease, transform 0.1s ease; }
   .primary-btn:hover { filter: brightness(1.08); }
   .primary-btn:active { transform: scale(0.97); }
   .primary-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
   .filter-row { display:flex; gap:8px; flex-wrap:wrap; margin: 16px 0 20px; }
-  .chip { background: transparent; border: 1px solid var(--border); color: var(--text-faint); padding: 5px 12px; border-radius: 999px; font-size: 12px; cursor:pointer; font-family: ${SANS}; transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease; }
+  .chip { background: transparent; border: 1px solid var(--border); color: var(--text-faint); padding: 5px 12px; border-radius: 999px; font-size: 13px; cursor:pointer; font-family: ${SANS}; transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease; }
   .chip:hover { color: var(--text); border-color: var(--text-faint); }
   .chip-active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
@@ -1045,22 +1045,20 @@ const CSS = `
 
   .task-list { display:flex; flex-direction:column; gap: 12px; }
   .empty-state { text-align:center; color: var(--text-faint); padding: 60px 20px; display:flex; flex-direction:column; align-items:center; gap: 10px; }
-  .empty-state p { max-width: 340px; margin: 0; font-size: 13.5px; }
+  .empty-state p { max-width: 340px; margin: 0; font-size: 14.5px; }
 
-  .task-card { background: var(--surface); border: 1px solid transparent; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 20px -16px rgba(0,0,0,0.5); transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease; animation: cardIn 0.28s ease both; }
+  .task-card { background: var(--surface); border: 1px solid transparent; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 20px -16px rgba(0,0,0,0.5); transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease; animation: cardIn 0.28s ease both; cursor: pointer; }
   .task-card:hover { border-color: var(--border); transform: translateY(-2px); box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 14px 26px -16px rgba(0,0,0,0.6); }
   .task-card.overdue { border-color: rgba(209,112,106,0.35); }
   .task-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 8px; }
-  .subject-chip { font-size: 11.5px; color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent); padding: 3px 9px; border-radius: 999px; font-weight: 600; }
+  .subject-chip { font-size: 12px; color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent); padding: 3px 9px; border-radius: 999px; font-weight: 600; }
   .star-btn { background:none; border:none; cursor:pointer; padding: 2px; display:flex; }
 
-  .task-title { font-family: ${SERIF}; font-weight: 400; font-size: 17.5px; margin: 0 0 5px; color: var(--text); letter-spacing: 0.1px; }
-  .task-title-link { cursor: pointer; transition: color 0.15s ease; width: fit-content; }
-  .task-title-link:hover { color: var(--accent); }
-  .task-desc { font-size: 13px; color: var(--text-faint); margin: 0 0 12px; line-height: 1.55; }
+  .task-title { font-family: ${SERIF}; font-weight: 400; font-size: 19px; margin: 0 0 5px; color: var(--text); letter-spacing: 0.1px; }
+  .task-desc { font-size: 14px; color: var(--text-faint); margin: 0 0 12px; line-height: 1.55; }
 
   .attachments { display:flex; flex-wrap:wrap; gap:6px; margin-bottom: 10px; }
-  .attachment-chip { display:inline-flex; align-items:center; gap:5px; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim); font-size: 11.5px; padding: 4px 9px 4px 5px; border-radius: 7px; text-decoration:none; transition: color 0.15s ease, border-color 0.15s ease; }
+  .attachment-chip { display:inline-flex; align-items:center; gap:5px; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim); font-size: 12px; padding: 4px 9px 4px 5px; border-radius: 7px; text-decoration:none; transition: color 0.15s ease, border-color 0.15s ease; }
   .attachment-chip:hover { color: var(--text); border-color: var(--text-faint); }
   .attachment-chip.removable { cursor: default; }
   .attachment-chip svg:last-child { cursor: pointer; margin-left: 2px; }
@@ -1072,13 +1070,16 @@ const CSS = `
 
   .task-bottom { display:flex; align-items:center; gap: 10px; flex-wrap: wrap; }
   .status-row { display:flex; align-items:center; gap: 5px; }
+  .status-cycle { display:flex; align-items:center; gap: 6px; background: color-mix(in srgb, var(--sc) 16%, transparent); border: 1px solid color-mix(in srgb, var(--sc) 40%, transparent); color: var(--sc); font-size: 12px; font-weight: 600; padding: 5px 11px; border-radius: 999px; cursor:pointer; transition: filter 0.15s ease, transform 0.1s ease; }
+  .status-cycle:hover { filter: brightness(1.15); }
+  .status-cycle:active { transform: scale(0.96); }
   .status-dot { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-faint); display:flex; align-items:center; justify-content:center; cursor:pointer; transition: all 0.15s ease; padding:0; }
   .status-dot:hover { border-color: var(--sc); color: var(--sc); transform: scale(1.08); }
   .status-dot-active { background: color-mix(in srgb, var(--sc) 20%, transparent); border-color: var(--sc); color: var(--sc); }
   .status-dot-lg { width: 28px; height: 28px; }
-  .detail-status-label { font-size: 12.5px; color: var(--text-dim); margin-left: 4px; }
-  .deadline { display:flex; align-items:center; gap:4px; font-size: 12px; color: var(--text-faint); }
-  .deadline-banner { display:flex; align-items:center; gap: 8px; background: var(--accent-soft); border: 1px solid rgba(224,164,88,0.3); color: var(--accent); padding: 9px 12px; border-radius: 10px; font-size: 12.5px; margin-bottom: 16px; animation: slideDown 0.2s ease; }
+  .detail-status-label { font-size: 13px; color: var(--text-dim); margin-left: 4px; }
+  .deadline { display:flex; align-items:center; gap:4px; font-size: 12.5px; color: var(--text-faint); }
+  .deadline-banner { display:flex; align-items:center; gap: 8px; background: var(--accent-soft); border: 1px solid rgba(224,164,88,0.3); color: var(--accent); padding: 9px 12px; border-radius: 10px; font-size: 13px; margin-bottom: 16px; animation: slideDown 0.2s ease; }
   .deadline-banner span { flex: 1; }
   .deadline-soon { color: var(--accent); }
   .deadline-over { color: var(--red); }
@@ -1090,10 +1091,10 @@ const CSS = `
   .modal { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; width: 380px; max-width: 100%; max-height: 88vh; overflow-y: auto; animation: modalIn 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
   .modal.wide { width: 460px; }
   .modal-head { display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px; }
-  .modal-head h2 { font-family: ${SERIF}; font-weight:400; font-size: 19px; margin:0; }
+  .modal-head h2 { font-family: ${SERIF}; font-weight:400; font-size: 21px; margin:0; }
 
-  .field-label { display:block; font-size: 11px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-faint); margin: 14px 0 7px; }
-  .text-input { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 9px 11px; border-radius: 8px; font-size: 13.5px; outline: none; font-family: ${SANS}; transition: border-color 0.15s ease; }
+  .field-label { display:block; font-size: 11.5px; letter-spacing: 0.03em; text-transform: uppercase; color: var(--text-faint); margin: 14px 0 7px; }
+  .text-input { width: 100%; background: var(--surface); border: 1px solid var(--border); color: var(--text); padding: 9px 11px; border-radius: 8px; font-size: 14.5px; outline: none; font-family: ${SANS}; transition: border-color 0.15s ease; }
   .text-input:focus { border-color: var(--accent); }
   .text-input.small { flex: 0 0 auto; width: auto; }
   .textarea { resize: vertical; font-family: ${SANS}; }
@@ -1108,26 +1109,26 @@ const CSS = `
   .attach-form { display:flex; gap: 6px; align-items:center; }
   .attach-form .text-input { flex: 1; }
 
-  .checkbox-row { display:flex; align-items:center; gap: 8px; margin-top: 16px; font-size: 13px; color: var(--text-dim); cursor: pointer; }
+  .checkbox-row { display:flex; align-items:center; gap: 8px; margin-top: 16px; font-size: 14px; color: var(--text-dim); cursor: pointer; }
 
   .modal-actions { display:flex; justify-content:flex-end; gap: 10px; margin-top: 20px; }
-  .ghost-btn { background:none; border: 1px solid var(--border); color: var(--text-dim); padding: 8px 14px; border-radius: 8px; cursor:pointer; font-size: 13px; font-family: ${SANS}; display:flex; align-items:center; gap:6px; transition: color 0.15s ease, border-color 0.15s ease; }
+  .ghost-btn { background:none; border: 1px solid var(--border); color: var(--text-dim); padding: 8px 14px; border-radius: 8px; cursor:pointer; font-size: 14px; font-family: ${SANS}; display:flex; align-items:center; gap:6px; transition: color 0.15s ease, border-color 0.15s ease; }
   .ghost-btn:hover { color: var(--text); border-color: var(--text-faint); }
-  .danger-btn { background: var(--red); color: #1c0a0a; border:none; padding: 8px 14px; border-radius: 8px; cursor:pointer; font-size: 13px; font-weight:600; font-family: ${SANS}; }
+  .danger-btn { background: var(--red); color: #1c0a0a; border:none; padding: 8px 14px; border-radius: 8px; cursor:pointer; font-size: 14px; font-weight:600; font-family: ${SANS}; }
   .confirm-box { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 340px; max-width: 100%; }
-  .confirm-box p { margin: 0 0 16px; font-size: 13.5px; color: var(--text); line-height: 1.5; }
+  .confirm-box p { margin: 0 0 16px; font-size: 14.5px; color: var(--text); line-height: 1.5; }
   .confirm-actions { display:flex; justify-content:flex-end; gap: 10px; }
 
   .detail-modal { width: 520px; }
-  .detail-title { font-family: ${SERIF}; font-weight: 400; font-size: 22px; margin: 4px 0 2px; color: var(--text); }
-  .detail-deadline { display:flex; align-items:center; gap:6px; font-size: 12.5px; color: var(--text-faint); margin-bottom: 10px; }
-  .detail-desc { font-size: 13.5px; color: var(--text-dim); line-height: 1.6; white-space: pre-wrap; margin: 4px 0 16px; }
+  .detail-title { font-family: ${SERIF}; font-weight: 400; font-size: 24px; margin: 4px 0 2px; color: var(--text); }
+  .detail-deadline { display:flex; align-items:center; gap:6px; font-size: 13px; color: var(--text-faint); margin-bottom: 10px; }
+  .detail-desc { font-size: 14.5px; color: var(--text-dim); line-height: 1.6; white-space: pre-wrap; margin: 4px 0 16px; }
   .detail-gallery { display:flex; flex-wrap:wrap; gap: 10px; margin: 8px 0 16px; }
   .detail-photo { display:block; width: 96px; height: 96px; border-radius: 10px; overflow:hidden; border: 1px solid var(--border); transition: transform 0.15s ease, border-color 0.15s ease; }
   .detail-photo:hover { transform: scale(1.03); border-color: var(--accent); }
   .detail-photo img { width: 100%; height: 100%; object-fit: cover; display:block; }
   .detail-files { display:flex; flex-direction:column; gap: 6px; margin: 8px 0 6px; }
-  .detail-file-row { display:flex; align-items:center; gap: 9px; padding: 9px 11px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; color: var(--text-dim); text-decoration:none; font-size: 13px; transition: border-color 0.15s ease, color 0.15s ease; }
+  .detail-file-row { display:flex; align-items:center; gap: 9px; padding: 9px 11px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; color: var(--text-dim); text-decoration:none; font-size: 14px; transition: border-color 0.15s ease, color 0.15s ease; }
   .detail-file-row:hover { color: var(--text); border-color: var(--text-faint); }
 
   @keyframes cardIn {
