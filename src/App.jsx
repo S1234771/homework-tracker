@@ -3,8 +3,9 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
 import { db, auth, googleProvider } from "./firebase";
 import {
-  Search, Plus, Star, Link2, Calendar,
-  Trash2, Pencil, X, Check, BookOpen, Menu, AlertCircle, LogOut, Upload
+  Search, Plus, Star, Link2, Calendar, Circle, Clock, CheckCheck,
+  Trash2, Pencil, X, Check, BookOpen, Menu, AlertCircle, LogOut,
+  FileText, Paperclip, Bell
 } from "lucide-react";
 
 // Сжимает выбранное фото и превращает в data URL, чтобы хранить
@@ -43,10 +44,10 @@ function GoogleIcon() {
 }
 
 const STATUSES = [
-  { id: "not_started", label: "Не начато", color: "var(--grey)" },
-  { id: "in_progress", label: "В процессе", color: "var(--accent)" },
-  { id: "done", label: "Сделано", color: "var(--green)" },
-  { id: "submitted", label: "Сдано", color: "var(--blue)" },
+  { id: "not_started", label: "Не начато", color: "var(--grey)", Icon: Circle },
+  { id: "in_progress", label: "В процессе", color: "var(--accent)", Icon: Clock },
+  { id: "done", label: "Сделано", color: "var(--green)", Icon: Check },
+  { id: "submitted", label: "Сдано", color: "var(--blue)", Icon: CheckCheck },
 ];
 
 const SUBJECT_COLORS = ["#e0a458", "#6fae8c", "#7195c9", "#c07d92", "#8f8fc2", "#5fa8a0", "#c98f5f"];
@@ -89,7 +90,10 @@ export default function App() {
 
   const [showSubjectForm, setShowSubjectForm] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
+  const [viewingTask, setViewingTask] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [deadlineBanner, setDeadlineBanner] = useState([]);
+  const notifiedRef = useRef(false);
 
   const firstLoad = useRef(true);
   const saveTimer = useRef(null);
@@ -160,6 +164,35 @@ export default function App() {
     return () => clearTimeout(saveTimer.current);
   }, [subjects, tasks, loaded, user]);
 
+  // Проверяем задания с приближающимся дедлайном и, если можно, показываем
+  // системное уведомление браузера (один раз за сеанс)
+  useEffect(() => {
+    if (!loaded || notifiedRef.current) return;
+    notifiedRef.current = true;
+    const soonTasks = tasks.filter((t) => {
+      if (t.status === "submitted" || !t.deadline) return false;
+      const d = daysUntil(t.deadline);
+      return d !== null && d >= 0 && d <= 2;
+    });
+    if (soonTasks.length === 0) return;
+    setDeadlineBanner(soonTasks);
+    if (typeof Notification !== "undefined") {
+      const notify = () => {
+        const titles = soonTasks.slice(0, 3).map((t) => t.title).join(", ");
+        new Notification("Скоро дедлайн", {
+          body: soonTasks.length > 3 ? `${titles} и ещё ${soonTasks.length - 3}` : titles,
+        });
+      };
+      if (Notification.permission === "granted") {
+        notify();
+      } else if (Notification.permission !== "denied") {
+        Notification.requestPermission().then((perm) => {
+          if (perm === "granted") notify();
+        });
+      }
+    }
+  }, [loaded, tasks]);
+
   const filteredSubjects = useMemo(() => {
     if (!query.trim()) return subjects;
     const q = query.trim().toLowerCase();
@@ -210,6 +243,12 @@ export default function App() {
   }
   function toggleFavorite(id) {
     setTasks((t) => t.map((x) => (x.id === id ? { ...x, favorite: !x.favorite } : x)));
+  }
+  function setTaskStatus(id, status) {
+    setTasks((t) => t.map((x) => (x.id === id ? { ...x, status } : x)));
+  }
+  function dismissDeadlineBanner() {
+    setDeadlineBanner([]);
   }
 
   const taskCount = (subjectId) => tasks.filter((t) => t.subjectId === subjectId).length;
@@ -381,6 +420,19 @@ export default function App() {
           ))}
         </div>
 
+        {deadlineBanner.length > 0 && (
+          <div className="deadline-banner">
+            <Bell size={15} strokeWidth={1.75} />
+            <span>
+              Скоро дедлайн: {deadlineBanner.slice(0, 3).map((t) => t.title).join(", ")}
+              {deadlineBanner.length > 3 && ` и ещё ${deadlineBanner.length - 3}`}
+            </span>
+            <button className="icon-btn" onClick={dismissDeadlineBanner}>
+              <X size={14} strokeWidth={1.75} />
+            </button>
+          </div>
+        )}
+
         {saveError && (
           <div className="save-error">
             <AlertCircle size={14} strokeWidth={1.75} /> {saveError}
@@ -401,14 +453,18 @@ export default function App() {
             </div>
           )}
 
-          {visibleTasks.map((t) => {
+          {visibleTasks.map((t, idx) => {
             const subj = subjects.find((s) => s.id === t.subjectId);
             const dLeft = daysUntil(t.deadline);
             const overdue = dLeft !== null && dLeft < 0 && t.status !== "submitted";
             const soon = dLeft !== null && dLeft >= 0 && dLeft <= 2 && t.status !== "submitted";
             const st = statusOf(t.status);
             return (
-              <div className={"task-card" + (overdue ? " overdue" : "")} key={t.id}>
+              <div
+                className={"task-card" + (overdue ? " overdue" : "")}
+                key={t.id}
+                style={{ animationDelay: `${Math.min(idx, 8) * 35}ms` }}
+              >
                 <div className="task-top">
                   <span className="subject-chip" style={{ "--c": subj?.color || "#888" }}>
                     {subj?.name || "Без предмета"}
@@ -423,7 +479,9 @@ export default function App() {
                   </button>
                 </div>
 
-                <h3 className="task-title">{t.title}</h3>
+                <h3 className="task-title task-title-link" onClick={() => setViewingTask(t)}>
+                  {t.title}
+                </h3>
                 {t.description && <p className="task-desc">{t.description}</p>}
 
                 {t.attachments?.length > 0 && (
@@ -434,24 +492,37 @@ export default function App() {
                         href={a.url}
                         target="_blank"
                         rel="noreferrer"
+                        download={a.type === "file" ? (a.label || "файл") : undefined}
                         className="attachment-chip"
-                        title={a.label || a.url}
+                        title={a.label || (a.type === "link" ? a.url : "")}
                       >
                         {a.type === "image" ? (
                           <img src={a.url} alt="" className="attachment-thumb" />
+                        ) : a.type === "file" ? (
+                          <FileText size={12} strokeWidth={1.75} />
                         ) : (
                           <Link2 size={12} strokeWidth={1.75} />
                         )}
-                        {a.label || (a.type === "image" ? "Фото" : "Ссылка")}
+                        {a.label || (a.type === "image" ? "Фото" : a.type === "file" ? "Файл" : "Ссылка")}
                       </a>
                     ))}
                   </div>
                 )}
 
                 <div className="task-bottom">
-                  <span className="status-badge" style={{ "--sc": st.color }}>
-                    {st.label}
-                  </span>
+                  <div className="status-row">
+                    {STATUSES.map((s) => (
+                      <button
+                        key={s.id}
+                        className={"status-dot" + (t.status === s.id ? " status-dot-active" : "")}
+                        style={{ "--sc": s.color }}
+                        title={s.label}
+                        onClick={() => setTaskStatus(t.id, s.id)}
+                      >
+                        <s.Icon size={12} strokeWidth={2.25} />
+                      </button>
+                    ))}
+                  </div>
                   {t.deadline && (
                     <span className={"deadline" + (overdue ? " deadline-over" : soon ? " deadline-soon" : "")}>
                       <Calendar size={12} strokeWidth={1.75} />
@@ -485,6 +556,19 @@ export default function App() {
             addSubject(name, color);
             setShowSubjectForm(false);
           }}
+        />
+      )}
+
+      {viewingTask && (
+        <TaskDetail
+          task={tasks.find((t) => t.id === viewingTask.id) || viewingTask}
+          subject={subjects.find((s) => s.id === viewingTask.subjectId)}
+          onClose={() => setViewingTask(null)}
+          onEdit={() => {
+            setEditingTask(viewingTask);
+            setViewingTask(null);
+          }}
+          onStatusChange={(status) => setTaskStatus(viewingTask.id, status)}
         />
       )}
 
@@ -578,9 +662,103 @@ function SubjectForm({ onClose, onSave }) {
   );
 }
 
+function TaskDetail({ task, subject, onClose, onEdit, onStatusChange }) {
+  const st = statusOf(task.status);
+  const images = (task.attachments || []).filter((a) => a.type === "image");
+  const files = (task.attachments || []).filter((a) => a.type !== "image");
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal wide detail-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <span className="subject-chip" style={{ "--c": subject?.color || "#888" }}>
+            {subject?.name || "Без предмета"}
+          </span>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={18} strokeWidth={1.75} />
+          </button>
+        </div>
+
+        <h2 className="detail-title">{task.title}</h2>
+
+        <div className="status-row" style={{ margin: "4px 0 16px" }}>
+          {STATUSES.map((s) => (
+            <button
+              key={s.id}
+              className={"status-dot status-dot-lg" + (task.status === s.id ? " status-dot-active" : "")}
+              style={{ "--sc": s.color }}
+              title={s.label}
+              onClick={() => onStatusChange(s.id)}
+            >
+              <s.Icon size={13} strokeWidth={2.25} />
+            </button>
+          ))}
+          <span className="detail-status-label">{st.label}</span>
+        </div>
+
+        {task.deadline && (
+          <div className="detail-deadline">
+            <Calendar size={13} strokeWidth={1.75} /> Срок: {formatDate(task.deadline)}
+          </div>
+        )}
+
+        {task.description && <p className="detail-desc">{task.description}</p>}
+
+        {images.length > 0 && (
+          <>
+            <label className="field-label">Фото</label>
+            <div className="detail-gallery">
+              {images.map((a) => (
+                <a key={a.id} href={a.url} target="_blank" rel="noreferrer" className="detail-photo">
+                  <img src={a.url} alt={a.label || ""} />
+                </a>
+              ))}
+            </div>
+          </>
+        )}
+
+        {files.length > 0 && (
+          <>
+            <label className="field-label">Файлы и ссылки</label>
+            <div className="detail-files">
+              {files.map((a) => (
+                <a
+                  key={a.id}
+                  href={a.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  download={a.type === "file" ? (a.label || "файл") : undefined}
+                  className="detail-file-row"
+                >
+                  {a.type === "file" ? <FileText size={15} strokeWidth={1.75} /> : <Link2 size={15} strokeWidth={1.75} />}
+                  <span>{a.label || (a.type === "file" ? "Файл" : a.url)}</span>
+                </a>
+              ))}
+            </div>
+          </>
+        )}
+
+        {!task.description && images.length === 0 && files.length === 0 && (
+          <p className="detail-desc" style={{ color: "var(--text-faint)" }}>
+            Подробностей и вложений пока нет.
+          </p>
+        )}
+
+        <div className="modal-actions">
+          <button className="ghost-btn" onClick={onClose}>
+            Закрыть
+          </button>
+          <button className="primary-btn" onClick={onEdit}>
+            <Pencil size={14} strokeWidth={2} /> Редактировать
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TaskForm({ task, subjects, onClose, onSave }) {
   const [form, setForm] = useState(task);
-  const [attType, setAttType] = useState("link");
+  const [attType, setAttType] = useState("file");
   const [attUrl, setAttUrl] = useState("");
   const [attLabel, setAttLabel] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -592,26 +770,47 @@ function TaskForm({ task, subjects, onClose, onSave }) {
     if (!attUrl.trim()) return;
     set("attachments", [
       ...(form.attachments || []),
-      { id: uid(), type: attType, url: attUrl.trim(), label: attLabel.trim() },
+      { id: uid(), type: "link", url: attUrl.trim(), label: attLabel.trim() },
     ]);
     setAttUrl("");
     setAttLabel("");
   }
-  async function handlePhotoPick(e) {
+
+  const MAX_FILE_BYTES = 700 * 1024; // с запасом под лимит документа Firestore в 1 МБ
+
+  async function handleFilePick(e) {
     const file = e.target.files?.[0];
     e.target.value = ""; // чтобы можно было выбрать тот же файл ещё раз
     if (!file) return;
     setUploadError(null);
     setUploading(true);
     try {
-      const dataUrl = await compressImageFile(file);
-      set("attachments", [
-        ...(form.attachments || []),
-        { id: uid(), type: "image", url: dataUrl, label: attLabel.trim() || file.name },
-      ]);
+      if (file.type.startsWith("image/")) {
+        const dataUrl = await compressImageFile(file);
+        set("attachments", [
+          ...(form.attachments || []),
+          { id: uid(), type: "image", url: dataUrl, label: attLabel.trim() || file.name },
+        ]);
+      } else {
+        if (file.size > MAX_FILE_BYTES) {
+          setUploadError(`Файл слишком большой (${Math.round(file.size / 1024)} КБ) — попробуйте до ~700 КБ`);
+          setUploading(false);
+          return;
+        }
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error("read failed"));
+          reader.readAsDataURL(file);
+        });
+        set("attachments", [
+          ...(form.attachments || []),
+          { id: uid(), type: "file", url: dataUrl, label: attLabel.trim() || file.name },
+        ]);
+      }
       setAttLabel("");
     } catch (err) {
-      setUploadError("Не получилось обработать фото — попробуйте другой файл");
+      setUploadError("Не получилось прикрепить файл — попробуйте другой");
     } finally {
       setUploading(false);
     }
@@ -681,17 +880,19 @@ function TaskForm({ task, subjects, onClose, onSave }) {
           </div>
         </div>
 
-        <label className="field-label">Вложения (фото или ссылки)</label>
+        <label className="field-label">Вложения (файлы, фото или ссылки)</label>
         {form.attachments?.length > 0 && (
           <div className="attachments" style={{ marginBottom: 8 }}>
             {form.attachments.map((a) => (
               <span key={a.id} className="attachment-chip removable">
                 {a.type === "image" ? (
                   <img src={a.url} alt="" className="attachment-thumb" />
+                ) : a.type === "file" ? (
+                  <FileText size={12} strokeWidth={1.75} />
                 ) : (
                   <Link2 size={12} strokeWidth={1.75} />
                 )}
-                {a.label || a.url.slice(0, 24)}
+                {a.label || (a.type === "link" ? a.url.slice(0, 24) : "Файл")}
                 <X size={12} strokeWidth={2} onClick={() => removeAttachment(a.id)} />
               </span>
             ))}
@@ -699,8 +900,8 @@ function TaskForm({ task, subjects, onClose, onSave }) {
         )}
         <div className="attach-form">
           <select className="text-input small" value={attType} onChange={(e) => setAttType(e.target.value)}>
+            <option value="file">Файл / фото</option>
             <option value="link">Ссылка</option>
-            <option value="image">Фото</option>
           </select>
           {attType === "link" ? (
             <>
@@ -729,8 +930,8 @@ function TaskForm({ task, subjects, onClose, onSave }) {
                 onChange={(e) => setAttLabel(e.target.value)}
               />
               <label className={"ghost-btn file-picker" + (uploading ? " disabled" : "")}>
-                {uploading ? "Обработка…" : (<><Upload size={14} strokeWidth={2} /> Выбрать фото</>)}
-                <input type="file" accept="image/*" disabled={uploading} onChange={handlePhotoPick} />
+                {uploading ? "Обработка…" : (<><Paperclip size={14} strokeWidth={2} /> Прикрепить</>)}
+                <input type="file" disabled={uploading} onChange={handleFilePick} />
               </label>
             </>
           )}
@@ -846,14 +1047,16 @@ const CSS = `
   .empty-state { text-align:center; color: var(--text-faint); padding: 60px 20px; display:flex; flex-direction:column; align-items:center; gap: 10px; }
   .empty-state p { max-width: 340px; margin: 0; font-size: 13.5px; }
 
-  .task-card { background: var(--surface); border: 1px solid transparent; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 20px -16px rgba(0,0,0,0.5); transition: border-color 0.15s ease; }
-  .task-card:hover { border-color: var(--border); }
+  .task-card { background: var(--surface); border: 1px solid transparent; border-radius: 12px; padding: 18px 20px; box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 8px 20px -16px rgba(0,0,0,0.5); transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease; animation: cardIn 0.28s ease both; }
+  .task-card:hover { border-color: var(--border); transform: translateY(-2px); box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 14px 26px -16px rgba(0,0,0,0.6); }
   .task-card.overdue { border-color: rgba(209,112,106,0.35); }
   .task-top { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 8px; }
   .subject-chip { font-size: 11.5px; color: var(--c); background: color-mix(in srgb, var(--c) 16%, transparent); padding: 3px 9px; border-radius: 999px; font-weight: 600; }
   .star-btn { background:none; border:none; cursor:pointer; padding: 2px; display:flex; }
 
   .task-title { font-family: ${SERIF}; font-weight: 400; font-size: 17.5px; margin: 0 0 5px; color: var(--text); letter-spacing: 0.1px; }
+  .task-title-link { cursor: pointer; transition: color 0.15s ease; width: fit-content; }
+  .task-title-link:hover { color: var(--accent); }
   .task-desc { font-size: 13px; color: var(--text-faint); margin: 0 0 12px; line-height: 1.55; }
 
   .attachments { display:flex; flex-wrap:wrap; gap:6px; margin-bottom: 10px; }
@@ -868,16 +1071,23 @@ const CSS = `
   .file-picker.disabled { opacity: 0.6; pointer-events: none; }
 
   .task-bottom { display:flex; align-items:center; gap: 10px; flex-wrap: wrap; }
-  .status-badge { font-size: 11.5px; font-weight: 600; color: var(--sc); background: color-mix(in srgb, var(--sc) 16%, transparent); padding: 4px 10px; border-radius: 999px; }
+  .status-row { display:flex; align-items:center; gap: 5px; }
+  .status-dot { width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text-faint); display:flex; align-items:center; justify-content:center; cursor:pointer; transition: all 0.15s ease; padding:0; }
+  .status-dot:hover { border-color: var(--sc); color: var(--sc); transform: scale(1.08); }
+  .status-dot-active { background: color-mix(in srgb, var(--sc) 20%, transparent); border-color: var(--sc); color: var(--sc); }
+  .status-dot-lg { width: 28px; height: 28px; }
+  .detail-status-label { font-size: 12.5px; color: var(--text-dim); margin-left: 4px; }
   .deadline { display:flex; align-items:center; gap:4px; font-size: 12px; color: var(--text-faint); }
+  .deadline-banner { display:flex; align-items:center; gap: 8px; background: var(--accent-soft); border: 1px solid rgba(224,164,88,0.3); color: var(--accent); padding: 9px 12px; border-radius: 10px; font-size: 12.5px; margin-bottom: 16px; animation: slideDown 0.2s ease; }
+  .deadline-banner span { flex: 1; }
   .deadline-soon { color: var(--accent); }
   .deadline-over { color: var(--red); }
   .spacer { flex: 1; }
   .icon-btn { background:none; border:none; color: var(--text-faint); cursor:pointer; padding: 4px; border-radius: 6px; display:flex; }
   .icon-btn:hover { color: var(--text); background: var(--surface-hover); }
 
-  .modal-scrim { position: fixed; inset: 0; background: rgba(10,11,14,0.6); display:flex; align-items:center; justify-content:center; z-index: 50; padding: 20px; }
-  .modal { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; width: 380px; max-width: 100%; max-height: 88vh; overflow-y: auto; }
+  .modal-scrim { position: fixed; inset: 0; background: rgba(10,11,14,0.6); display:flex; align-items:center; justify-content:center; z-index: 50; padding: 20px; animation: scrimIn 0.15s ease; }
+  .modal { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; width: 380px; max-width: 100%; max-height: 88vh; overflow-y: auto; animation: modalIn 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
   .modal.wide { width: 460px; }
   .modal-head { display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px; }
   .modal-head h2 { font-family: ${SERIF}; font-weight:400; font-size: 19px; margin:0; }
@@ -907,6 +1117,35 @@ const CSS = `
   .confirm-box { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 340px; max-width: 100%; }
   .confirm-box p { margin: 0 0 16px; font-size: 13.5px; color: var(--text); line-height: 1.5; }
   .confirm-actions { display:flex; justify-content:flex-end; gap: 10px; }
+
+  .detail-modal { width: 520px; }
+  .detail-title { font-family: ${SERIF}; font-weight: 400; font-size: 22px; margin: 4px 0 2px; color: var(--text); }
+  .detail-deadline { display:flex; align-items:center; gap:6px; font-size: 12.5px; color: var(--text-faint); margin-bottom: 10px; }
+  .detail-desc { font-size: 13.5px; color: var(--text-dim); line-height: 1.6; white-space: pre-wrap; margin: 4px 0 16px; }
+  .detail-gallery { display:flex; flex-wrap:wrap; gap: 10px; margin: 8px 0 16px; }
+  .detail-photo { display:block; width: 96px; height: 96px; border-radius: 10px; overflow:hidden; border: 1px solid var(--border); transition: transform 0.15s ease, border-color 0.15s ease; }
+  .detail-photo:hover { transform: scale(1.03); border-color: var(--accent); }
+  .detail-photo img { width: 100%; height: 100%; object-fit: cover; display:block; }
+  .detail-files { display:flex; flex-direction:column; gap: 6px; margin: 8px 0 6px; }
+  .detail-file-row { display:flex; align-items:center; gap: 9px; padding: 9px 11px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; color: var(--text-dim); text-decoration:none; font-size: 13px; transition: border-color 0.15s ease, color 0.15s ease; }
+  .detail-file-row:hover { color: var(--text); border-color: var(--text-faint); }
+
+  @keyframes cardIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes modalIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes scrimIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
 
   @media (max-width: 760px) {
     .sidebar { position: fixed; top:0; left:0; bottom:0; z-index: 40; transform: translateX(-100%); transition: transform 0.2s ease; box-shadow: 8px 0 24px rgba(0,0,0,0.4); }
