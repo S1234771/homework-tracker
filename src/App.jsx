@@ -5,7 +5,7 @@ import { db, auth, googleProvider } from "./firebase";
 import {
   Search, Plus, Star, Link2, Calendar, Circle, Clock, CheckCheck,
   Trash2, Pencil, X, Check, BookOpen, Menu, AlertCircle, LogOut,
-  FileText, Paperclip, Bell, Sun, Moon
+  FileText, Paperclip, Bell, Sun, Moon, TrendingUp, ChevronLeft, ChevronRight, LayoutList
 } from "lucide-react";
 
 // Сжимает выбранное фото и превращает в data URL, чтобы хранить
@@ -51,6 +51,7 @@ const STATUSES = [
 ];
 
 const SUBJECT_COLORS = ["#e0a458", "#6fae8c", "#7195c9", "#c07d92", "#8f8fc2", "#5fa8a0", "#c98f5f"];
+const SUBJECT_ICONS = ["📘", "📐", "🧪", "🎨", "🌍", "💻", "🎵", "🏃", "📖", "🔬", "✏️", "🗣️"];
 
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 
@@ -71,6 +72,34 @@ function formatDate(dateStr) {
   if (!dateStr) return null;
   const d = new Date(dateStr);
   return d.toLocaleDateString("ru-RU", { day: "numeric", month: "short" });
+}
+
+function toDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function todayStr() {
+  return toDateStr(new Date());
+}
+
+const WEEKDAYS_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
+const MONTHS_RU = [
+  "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь",
+  "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь",
+];
+
+// Строит сетку дней месяца (с понедельника), для календаря
+function buildMonthGrid(year, month) {
+  const first = new Date(year, month, 1);
+  const startOffset = (first.getDay() + 6) % 7; // 0 = понедельник
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const cells = [];
+  for (let i = 0; i < startOffset; i++) cells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) cells.push(new Date(year, month, d));
+  return cells;
 }
 
 export default function App() {
@@ -110,6 +139,17 @@ export default function App() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deadlineBanner, setDeadlineBanner] = useState([]);
   const notifiedRef = useRef(false);
+
+  const [undoTask, setUndoTask] = useState(null);
+  const undoTimerRef = useRef(null);
+
+  const [viewMode, setViewMode] = useState("list"); // 'list' | 'calendar'
+  const [calendarCursor, setCalendarCursor] = useState(() => {
+    const n = new Date();
+    return { year: n.getFullYear(), month: n.getMonth() };
+  });
+  const [selectedDate, setSelectedDate] = useState(todayStr());
+  const [showStats, setShowStats] = useState(false);
 
   const firstLoad = useRef(true);
   const saveTimer = useRef(null);
@@ -219,6 +259,9 @@ export default function App() {
     let list = tasks;
     if (activeSubject === "favorites") {
       list = list.filter((t) => t.favorite);
+    } else if (activeSubject === "today") {
+      const t0 = todayStr();
+      list = list.filter((t) => t.deadline && t.deadline <= t0 && t.status !== "submitted");
     } else if (activeSubject !== "all") {
       list = list.filter((t) => t.subjectId === activeSubject);
     }
@@ -240,8 +283,8 @@ export default function App() {
     });
   }, [tasks, activeSubject, statusFilter, query, subjects]);
 
-  function addSubject(name, color) {
-    setSubjects((s) => [...s, { id: uid(), name, color }]);
+  function addSubject(name, color, icon) {
+    setSubjects((s) => [...s, { id: uid(), name, color, icon: icon || "" }]);
   }
   function deleteSubject(id) {
     setSubjects((s) => s.filter((x) => x.id !== id));
@@ -254,8 +297,17 @@ export default function App() {
       return exists ? t.map((x) => (x.id === task.id ? task : x)) : [...t, task];
     });
   }
-  function deleteTask(id) {
-    setTasks((t) => t.filter((x) => x.id !== id));
+  function deleteTaskWithUndo(task) {
+    setTasks((t) => t.filter((x) => x.id !== task.id));
+    if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    setUndoTask(task);
+    undoTimerRef.current = setTimeout(() => setUndoTask(null), 5000);
+  }
+  function undoDelete() {
+    if (!undoTask) return;
+    setTasks((t) => [...t, undoTask]);
+    clearTimeout(undoTimerRef.current);
+    setUndoTask(null);
   }
   function toggleFavorite(id) {
     setTasks((t) => t.map((x) => (x.id === id ? { ...x, favorite: !x.favorite } : x)));
@@ -268,6 +320,28 @@ export default function App() {
   }
 
   const taskCount = (subjectId) => tasks.filter((t) => t.subjectId === subjectId).length;
+
+  const stats = useMemo(() => {
+    const isDone = (t) => t.status === "done" || t.status === "submitted";
+    const total = tasks.length;
+    const done = tasks.filter(isDone).length;
+
+    const now = new Date();
+    const weekAgo = new Date(now);
+    weekAgo.setDate(weekAgo.getDate() - 6);
+    const weekAgoStr = toDateStr(weekAgo);
+    const todayS = todayStr();
+    const weekTasks = tasks.filter((t) => t.deadline && t.deadline >= weekAgoStr && t.deadline <= todayS);
+    const weekDone = weekTasks.filter(isDone).length;
+
+    const bySubject = subjects.map((s) => {
+      const list = tasks.filter((t) => t.subjectId === s.id);
+      const d = list.filter(isDone).length;
+      return { subject: s, total: list.length, done: d };
+    });
+
+    return { total, done, weekTotal: weekTasks.length, weekDone, bySubject };
+  }, [tasks, subjects]);
 
   if (!authChecked) {
     return (
@@ -345,6 +419,16 @@ export default function App() {
             <span className="count">{tasks.length}</span>
           </button>
           <button
+            className={"nav-item" + (activeSubject === "today" ? " active" : "")}
+            onClick={() => setActiveSubject("today")}
+          >
+            <Bell size={13} strokeWidth={1.75} className="star-icon" />
+            Сегодня
+            <span className="count">
+              {tasks.filter((t) => t.deadline && t.deadline <= todayStr() && t.status !== "submitted").length}
+            </span>
+          </button>
+          <button
             className={"nav-item" + (activeSubject === "favorites" ? " active" : "")}
             onClick={() => setActiveSubject("favorites")}
           >
@@ -362,7 +446,11 @@ export default function App() {
               className={"nav-item" + (activeSubject === s.id ? " active" : "")}
               onClick={() => setActiveSubject(s.id)}
             >
-              <span className="dot" style={{ background: s.color }} />
+              {s.icon ? (
+                <span className="subject-emoji">{s.icon}</span>
+              ) : (
+                <span className="dot" style={{ background: s.color }} />
+              )}
               <span className="subject-name">{s.name}</span>
               <span className="count">{taskCount(s.id)}</span>
               <span
@@ -386,6 +474,11 @@ export default function App() {
           Добавить предмет
         </button>
 
+        <button className="add-subject-btn" onClick={() => setShowStats(true)}>
+          <TrendingUp size={15} strokeWidth={1.75} />
+          Статистика
+        </button>
+
         <div className="user-row">
           {user.photoURL ? (
             <img src={user.photoURL} alt="" className="user-avatar" />
@@ -407,19 +500,28 @@ export default function App() {
           <h1>
             {activeSubject === "all"
               ? "Все задания"
+              : activeSubject === "today"
+              ? "Сегодня"
               : activeSubject === "favorites"
               ? "Избранное"
               : subjects.find((s) => s.id === activeSubject)?.name || "Задания"}
           </h1>
           <button
+            className="view-toggle-btn"
+            onClick={() => setViewMode((v) => (v === "list" ? "calendar" : "list"))}
+            title={viewMode === "list" ? "Показать календарь" : "Показать список"}
+          >
+            {viewMode === "list" ? <Calendar size={16} strokeWidth={1.75} /> : <LayoutList size={16} strokeWidth={1.75} />}
+          </button>
+          <button
             className="primary-btn"
             onClick={() =>
               setEditingTask({
                 id: uid(),
-                subjectId: activeSubject !== "all" && activeSubject !== "favorites" ? activeSubject : subjects[0]?.id || "",
+                subjectId: activeSubject !== "all" && activeSubject !== "favorites" && activeSubject !== "today" ? activeSubject : subjects[0]?.id || "",
                 title: "",
                 description: "",
-                deadline: "",
+                deadline: viewMode === "calendar" ? selectedDate : "",
                 status: "not_started",
                 favorite: false,
                 attachments: [],
@@ -431,18 +533,6 @@ export default function App() {
             Новое задание
           </button>
         </header>
-
-        <div className="filter-row">
-          {["all", ...STATUSES.map((s) => s.id)].map((f) => (
-            <button
-              key={f}
-              className={"chip" + (statusFilter === f ? " chip-active" : "")}
-              onClick={() => setStatusFilter(f)}
-            >
-              {f === "all" ? "Все статусы" : statusOf(f).label}
-            </button>
-          ))}
-        </div>
 
         {deadlineBanner.length > 0 && (
           <div className="deadline-banner">
@@ -463,132 +553,79 @@ export default function App() {
           </div>
         )}
 
-        <div className="task-list">
-          {subjects.length === 0 && (
-            <div className="empty-state">
-              <BookOpen size={28} strokeWidth={1.25} />
-              <p>Сначала добавьте предмет слева — тогда можно будет завести первое задание.</p>
+        {viewMode === "calendar" ? (
+          <CalendarView
+            cursor={calendarCursor}
+            setCursor={setCalendarCursor}
+            tasks={tasks}
+            subjects={subjects}
+            selectedDate={selectedDate}
+            setSelectedDate={setSelectedDate}
+            onOpenTask={setViewingTask}
+            onToggleFavorite={toggleFavorite}
+            onCycleStatus={(t) => {
+              const i = STATUSES.findIndex((s) => s.id === t.status);
+              setTaskStatus(t.id, STATUSES[(i + 1) % STATUSES.length].id);
+            }}
+            onEdit={setEditingTask}
+            onDelete={deleteTaskWithUndo}
+            onPreviewImage={setPreviewImage}
+          />
+        ) : (
+          <>
+            <div className="filter-row">
+              {["all", ...STATUSES.map((s) => s.id)].map((f) => (
+                <button
+                  key={f}
+                  className={"chip" + (statusFilter === f ? " chip-active" : "")}
+                  onClick={() => setStatusFilter(f)}
+                >
+                  {f === "all" ? "Все статусы" : statusOf(f).label}
+                </button>
+              ))}
             </div>
-          )}
 
-          {subjects.length > 0 && visibleTasks.length === 0 && (
-            <div className="empty-state">
-              <p>Заданий здесь пока нет.</p>
+            <div className="task-list">
+              {subjects.length === 0 && (
+                <div className="empty-state">
+                  <BookOpen size={28} strokeWidth={1.25} />
+                  <p>Сначала добавьте предмет слева — тогда можно будет завести первое задание.</p>
+                </div>
+              )}
+
+              {subjects.length > 0 && visibleTasks.length === 0 && (
+                <div className="empty-state">
+                  <p>Заданий здесь пока нет.</p>
+                </div>
+              )}
+
+              {visibleTasks.map((t, idx) => (
+                <TaskCard
+                  key={t.id}
+                  task={t}
+                  subject={subjects.find((s) => s.id === t.subjectId)}
+                  delay={Math.min(idx, 8) * 35}
+                  onOpen={() => setViewingTask(t)}
+                  onToggleFavorite={() => toggleFavorite(t.id)}
+                  onCycleStatus={() => {
+                    const i = STATUSES.findIndex((s) => s.id === t.status);
+                    setTaskStatus(t.id, STATUSES[(i + 1) % STATUSES.length].id);
+                  }}
+                  onEdit={() => setEditingTask(t)}
+                  onDelete={() => deleteTaskWithUndo(t)}
+                  onPreviewImage={setPreviewImage}
+                />
+              ))}
             </div>
-          )}
-
-          {visibleTasks.map((t, idx) => {
-            const subj = subjects.find((s) => s.id === t.subjectId);
-            const dLeft = daysUntil(t.deadline);
-            const overdue = dLeft !== null && dLeft < 0 && t.status !== "submitted";
-            const soon = dLeft !== null && dLeft >= 0 && dLeft <= 2 && t.status !== "submitted";
-            const st = statusOf(t.status);
-            return (
-              <div
-                className={"task-card" + (overdue ? " overdue" : "")}
-                key={t.id}
-                style={{ animationDelay: `${Math.min(idx, 8) * 35}ms` }}
-                onClick={() => setViewingTask(t)}
-              >
-                <div className="task-top">
-                  <span className="subject-chip" style={{ "--c": subj?.color || "#888" }}>
-                    {subj?.name || "Без предмета"}
-                  </span>
-                  <button className="star-btn" onClick={(e) => { e.stopPropagation(); toggleFavorite(t.id); }}>
-                    <Star
-                      size={16}
-                      strokeWidth={1.75}
-                      fill={t.favorite ? "var(--accent)" : "none"}
-                      color={t.favorite ? "var(--accent)" : "var(--text-faint)"}
-                    />
-                  </button>
-                </div>
-
-                <h3 className="task-title">{t.title}</h3>
-                {t.description && <p className="task-desc">{t.description}</p>}
-
-                {t.attachments?.length > 0 && (
-                  <div className="attachments">
-                    {t.attachments.map((a) =>
-                      a.type === "image" ? (
-                        <button
-                          key={a.id}
-                          type="button"
-                          className="attachment-chip"
-                          title={a.label || "Фото"}
-                          onClick={(e) => { e.stopPropagation(); setPreviewImage(a); }}
-                        >
-                          <img src={a.url} alt="" className="attachment-thumb" />
-                          {a.label || "Фото"}
-                        </button>
-                      ) : (
-                        <a
-                          key={a.id}
-                          href={a.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          download={a.type === "file" ? (a.label || "файл") : undefined}
-                          className="attachment-chip"
-                          title={a.label || (a.type === "link" ? a.url : "")}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {a.type === "file" ? (
-                            <FileText size={12} strokeWidth={1.75} />
-                          ) : (
-                            <Link2 size={12} strokeWidth={1.75} />
-                          )}
-                          {a.label || (a.type === "file" ? "Файл" : "Ссылка")}
-                        </a>
-                      )
-                    )}
-                  </div>
-                )}
-
-                <div className="task-bottom">
-                  <button
-                    className="status-cycle"
-                    style={{ "--sc": st.color }}
-                    title={`Статус: ${st.label} (нажмите, чтобы изменить)`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const i = STATUSES.findIndex((s) => s.id === t.status);
-                      setTaskStatus(t.id, STATUSES[(i + 1) % STATUSES.length].id);
-                    }}
-                  >
-                    <st.Icon size={12} strokeWidth={2.25} />
-                    {st.label}
-                  </button>
-                  {t.deadline && (
-                    <span className={"deadline" + (overdue ? " deadline-over" : soon ? " deadline-soon" : "")}>
-                      <Calendar size={12} strokeWidth={1.75} />
-                      {formatDate(t.deadline)}
-                      {overdue && " · просрочено"}
-                      {soon && !overdue && dLeft === 0 && " · сегодня"}
-                      {soon && !overdue && dLeft === 1 && " · завтра"}
-                    </span>
-                  )}
-                  <span className="spacer" />
-                  <button className="icon-btn" onClick={(e) => { e.stopPropagation(); setEditingTask(t); }}>
-                    <Pencil size={14} strokeWidth={1.75} />
-                  </button>
-                  <button
-                    className="icon-btn"
-                    onClick={(e) => { e.stopPropagation(); setConfirmDelete({ type: "task", id: t.id, name: t.title }); }}
-                  >
-                    <Trash2 size={14} strokeWidth={1.75} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+          </>
+        )}
       </main>
 
       {showSubjectForm && (
         <SubjectForm
           onClose={() => setShowSubjectForm(false)}
-          onSave={(name, color) => {
-            addSubject(name, color);
+          onSave={(name, color, icon) => {
+            addSubject(name, color, icon);
             setShowSubjectForm(false);
           }}
         />
@@ -638,11 +675,7 @@ export default function App() {
       {confirmDelete && (
         <div className="modal-scrim" onClick={() => setConfirmDelete(null)}>
           <div className="confirm-box" onClick={(e) => e.stopPropagation()}>
-            <p>
-              {confirmDelete.type === "subject"
-                ? `Удалить предмет «${confirmDelete.name}» вместе со всеми его заданиями?`
-                : `Удалить задание «${confirmDelete.name}»?`}
-            </p>
+            <p>{`Удалить предмет «${confirmDelete.name}» вместе со всеми его заданиями?`}</p>
             <div className="confirm-actions">
               <button className="ghost-btn" onClick={() => setConfirmDelete(null)}>
                 Отмена
@@ -650,8 +683,7 @@ export default function App() {
               <button
                 className="danger-btn"
                 onClick={() => {
-                  if (confirmDelete.type === "subject") deleteSubject(confirmDelete.id);
-                  else deleteTask(confirmDelete.id);
+                  deleteSubject(confirmDelete.id);
                   setConfirmDelete(null);
                 }}
               >
@@ -661,6 +693,17 @@ export default function App() {
           </div>
         </div>
       )}
+      {showStats && <StatsModal stats={stats} onClose={() => setShowStats(false)} />}
+
+      {undoTask && (
+        <div className="undo-toast">
+          <span>Удалено: «{undoTask.title}»</span>
+          <button className="undo-btn" onClick={undoDelete}>Отменить</button>
+          <button className="icon-btn" onClick={() => { clearTimeout(undoTimerRef.current); setUndoTask(null); }}>
+            <X size={14} strokeWidth={1.75} />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -668,6 +711,7 @@ export default function App() {
 function SubjectForm({ onClose, onSave }) {
   const [name, setName] = useState("");
   const [color, setColor] = useState(SUBJECT_COLORS[0]);
+  const [icon, setIcon] = useState("");
   return (
     <div className="modal-scrim" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
@@ -696,6 +740,25 @@ function SubjectForm({ onClose, onSave }) {
             />
           ))}
         </div>
+        <label className="field-label">Значок (необязательно)</label>
+        <div className="icon-row">
+          <button
+            className={"icon-swatch" + (icon === "" ? " selected" : "")}
+            onClick={() => setIcon("")}
+            title="Без значка"
+          >
+            <span className="dot" style={{ background: color }} />
+          </button>
+          {SUBJECT_ICONS.map((e) => (
+            <button
+              key={e}
+              className={"icon-swatch" + (icon === e ? " selected" : "")}
+              onClick={() => setIcon(e)}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
         <div className="modal-actions">
           <button className="ghost-btn" onClick={onClose}>
             Отмена
@@ -703,11 +766,107 @@ function SubjectForm({ onClose, onSave }) {
           <button
             className="primary-btn"
             disabled={!name.trim()}
-            onClick={() => onSave(name.trim(), color)}
+            onClick={() => onSave(name.trim(), color, icon)}
           >
             <Check size={15} strokeWidth={2} /> Создать
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function TaskCard({ task: t, subject: subj, delay, onOpen, onToggleFavorite, onCycleStatus, onEdit, onDelete, onPreviewImage }) {
+  const dLeft = daysUntil(t.deadline);
+  const overdue = dLeft !== null && dLeft < 0 && t.status !== "submitted";
+  const soon = dLeft !== null && dLeft >= 0 && dLeft <= 2 && t.status !== "submitted";
+  const st = statusOf(t.status);
+  return (
+    <div
+      className={"task-card" + (overdue ? " overdue" : "")}
+      style={{ animationDelay: `${delay || 0}ms` }}
+      onClick={onOpen}
+    >
+      <div className="task-top">
+        <span className="subject-chip" style={{ "--c": subj?.color || "#888" }}>
+          {subj?.icon ? `${subj.icon} ` : ""}{subj?.name || "Без предмета"}
+        </span>
+        <button className="star-btn" onClick={(e) => { e.stopPropagation(); onToggleFavorite(); }}>
+          <Star
+            size={16}
+            strokeWidth={1.75}
+            fill={t.favorite ? "var(--accent)" : "none"}
+            color={t.favorite ? "var(--accent)" : "var(--text-faint)"}
+          />
+        </button>
+      </div>
+
+      <h3 className="task-title">{t.title}</h3>
+      {t.description && <p className="task-desc">{t.description}</p>}
+
+      {t.attachments?.length > 0 && (
+        <div className="attachments">
+          {t.attachments.map((a) =>
+            a.type === "image" ? (
+              <button
+                key={a.id}
+                type="button"
+                className="attachment-chip"
+                title={a.label || "Фото"}
+                onClick={(e) => { e.stopPropagation(); onPreviewImage(a); }}
+              >
+                <img src={a.url} alt="" className="attachment-thumb" />
+                {a.label || "Фото"}
+              </button>
+            ) : (
+              <a
+                key={a.id}
+                href={a.url}
+                target="_blank"
+                rel="noreferrer"
+                download={a.type === "file" ? (a.label || "файл") : undefined}
+                className="attachment-chip"
+                title={a.label || (a.type === "link" ? a.url : "")}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {a.type === "file" ? (
+                  <FileText size={12} strokeWidth={1.75} />
+                ) : (
+                  <Link2 size={12} strokeWidth={1.75} />
+                )}
+                {a.label || (a.type === "file" ? "Файл" : "Ссылка")}
+              </a>
+            )
+          )}
+        </div>
+      )}
+
+      <div className="task-bottom">
+        <button
+          className="status-cycle"
+          style={{ "--sc": st.color }}
+          title={`Статус: ${st.label} (нажмите, чтобы изменить)`}
+          onClick={(e) => { e.stopPropagation(); onCycleStatus(); }}
+        >
+          <st.Icon size={12} strokeWidth={2.25} />
+          {st.label}
+        </button>
+        {t.deadline && (
+          <span className={"deadline" + (overdue ? " deadline-over" : soon ? " deadline-soon" : "")}>
+            <Calendar size={12} strokeWidth={1.75} />
+            {formatDate(t.deadline)}
+            {overdue && " · просрочено"}
+            {soon && !overdue && dLeft === 0 && " · сегодня"}
+            {soon && !overdue && dLeft === 1 && " · завтра"}
+          </span>
+        )}
+        <span className="spacer" />
+        <button className="icon-btn" onClick={(e) => { e.stopPropagation(); onEdit(); }}>
+          <Pencil size={14} strokeWidth={1.75} />
+        </button>
+        <button className="icon-btn" onClick={(e) => { e.stopPropagation(); onDelete(); }}>
+          <Trash2 size={14} strokeWidth={1.75} />
+        </button>
       </div>
     </div>
   );
@@ -722,7 +881,7 @@ function TaskDetail({ task, subject, onClose, onEdit, onStatusChange, onPreviewI
       <div className="modal wide detail-modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-head">
           <span className="subject-chip" style={{ "--c": subject?.color || "#888" }}>
-            {subject?.name || "Без предмета"}
+            {subject?.icon ? `${subject.icon} ` : ""}{subject?.name || "Без предмета"}
           </span>
           <button className="icon-btn" onClick={onClose}>
             <X size={18} strokeWidth={1.75} />
@@ -1011,6 +1170,152 @@ function TaskForm({ task, subjects, onClose, onSave }) {
   );
 }
 
+function CalendarView({
+  cursor, setCursor, tasks, subjects, selectedDate, setSelectedDate,
+  onOpenTask, onToggleFavorite, onCycleStatus, onEdit, onDelete, onPreviewImage,
+}) {
+  const cells = useMemo(() => buildMonthGrid(cursor.year, cursor.month), [cursor]);
+  const tasksByDate = useMemo(() => {
+    const map = {};
+    tasks.forEach((t) => {
+      if (!t.deadline) return;
+      (map[t.deadline] = map[t.deadline] || []).push(t);
+    });
+    return map;
+  }, [tasks]);
+  const todayS = todayStr();
+  const dayTasks = (tasksByDate[selectedDate] || []).slice().sort((a, b) => a.title.localeCompare(b.title));
+
+  function goMonth(delta) {
+    let { year, month } = cursor;
+    month += delta;
+    if (month < 0) { month = 11; year -= 1; }
+    if (month > 11) { month = 0; year += 1; }
+    setCursor({ year, month });
+  }
+
+  return (
+    <div className="calendar-wrap">
+      <div className="calendar-card">
+        <div className="calendar-head">
+          <button className="icon-btn" onClick={() => goMonth(-1)}><ChevronLeft size={16} strokeWidth={1.75} /></button>
+          <span className="calendar-month">{MONTHS_RU[cursor.month]} {cursor.year}</span>
+          <button className="icon-btn" onClick={() => goMonth(1)}><ChevronRight size={16} strokeWidth={1.75} /></button>
+        </div>
+        <div className="calendar-grid calendar-weekdays">
+          {WEEKDAYS_RU.map((w) => <div key={w} className="calendar-weekday">{w}</div>)}
+        </div>
+        <div className="calendar-grid">
+          {cells.map((d, i) => {
+            if (!d) return <div key={i} className="calendar-cell calendar-cell-empty" />;
+            const dStr = toDateStr(d);
+            const dayItems = tasksByDate[dStr] || [];
+            const isToday = dStr === todayS;
+            const isSelected = dStr === selectedDate;
+            const hasOverdue = dayItems.some((t) => dStr < todayS && t.status !== "submitted");
+            return (
+              <button
+                key={dStr}
+                className={
+                  "calendar-cell" +
+                  (isToday ? " calendar-cell-today" : "") +
+                  (isSelected ? " calendar-cell-selected" : "")
+                }
+                onClick={() => setSelectedDate(dStr)}
+              >
+                <span className="calendar-daynum">{d.getDate()}</span>
+                {dayItems.length > 0 && (
+                  <span className={"calendar-dot" + (hasOverdue ? " calendar-dot-over" : "")}>{dayItems.length}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="calendar-day-list">
+        <div className="section-label" style={{ padding: 0, marginBottom: 10 }}>
+          {formatDate(selectedDate)}{selectedDate === todayS ? " · сегодня" : ""}
+        </div>
+        {dayTasks.length === 0 ? (
+          <div className="empty-state"><p>На этот день ничего не задано.</p></div>
+        ) : (
+          dayTasks.map((t) => (
+            <TaskCard
+              key={t.id}
+              task={t}
+              subject={subjects.find((s) => s.id === t.subjectId)}
+              onOpen={() => onOpenTask(t)}
+              onToggleFavorite={() => onToggleFavorite(t.id)}
+              onCycleStatus={() => onCycleStatus(t)}
+              onEdit={() => onEdit(t)}
+              onDelete={() => onDelete(t)}
+              onPreviewImage={onPreviewImage}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function StatsModal({ stats, onClose }) {
+  const pct = stats.total ? Math.round((stats.done / stats.total) * 100) : 0;
+  const weekPct = stats.weekTotal ? Math.round((stats.weekDone / stats.weekTotal) * 100) : 0;
+  return (
+    <div className="modal-scrim" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <h2>Статистика</h2>
+          <button className="icon-btn" onClick={onClose}>
+            <X size={18} strokeWidth={1.75} />
+          </button>
+        </div>
+
+        <label className="field-label">Всего выполнено</label>
+        <div className="stat-row">
+          <div className="stat-bar"><div className="stat-bar-fill" style={{ width: `${pct}%` }} /></div>
+          <span className="stat-num">{pct}%</span>
+        </div>
+        <p className="detail-desc" style={{ margin: "4px 0 0" }}>{stats.done} из {stats.total} заданий</p>
+
+        <label className="field-label">За последние 7 дней</label>
+        <div className="stat-row">
+          <div className="stat-bar"><div className="stat-bar-fill" style={{ width: `${weekPct}%` }} /></div>
+          <span className="stat-num">{weekPct}%</span>
+        </div>
+        <p className="detail-desc" style={{ margin: "4px 0 0" }}>{stats.weekDone} из {stats.weekTotal} заданий с дедлайном на этой неделе</p>
+
+        {stats.bySubject.length > 0 && (
+          <>
+            <label className="field-label">По предметам</label>
+            <div className="stat-subject-list">
+              {stats.bySubject.map(({ subject, total, done }) => {
+                const p = total ? Math.round((done / total) * 100) : 0;
+                return (
+                  <div key={subject.id} className="stat-subject-row">
+                    <span className="stat-subject-name">
+                      {subject.icon ? `${subject.icon} ` : ""}{subject.name}
+                    </span>
+                    <div className="stat-bar stat-bar-sm">
+                      <div className="stat-bar-fill" style={{ width: `${p}%`, background: subject.color }} />
+                    </div>
+                    <span className="stat-num-sm">{done}/{total}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        <div className="modal-actions">
+          <button className="ghost-btn" onClick={onClose}>Закрыть</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 const SERIF = "Georgia, 'Iowan Old Style', 'Palatino Linotype', serif";
 
@@ -1220,6 +1525,45 @@ const CSS = `
   .lightbox-close { position: absolute; top: 20px; right: 24px; background: var(--surface); border: 1px solid var(--border); color: var(--text); width: 36px; height: 36px; border-radius: 50%; display:flex; align-items:center; justify-content:center; cursor:pointer; transition: border-color 0.15s ease; }
   .lightbox-close:hover { border-color: var(--text-faint); }
 
+  .subject-emoji { font-size: 14px; line-height: 1; width: 8px; text-align:center; flex-shrink:0; }
+  .icon-row { display:flex; flex-wrap:wrap; gap: 7px; }
+  .icon-swatch { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); display:flex; align-items:center; justify-content:center; font-size: 15px; cursor:pointer; transition: border-color 0.15s ease; }
+  .icon-swatch:hover { border-color: var(--text-faint); }
+  .icon-swatch.selected { border-color: var(--accent); background: var(--accent-soft); }
+
+  .view-toggle-btn { display:flex; align-items:center; justify-content:center; width: 36px; height: 36px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); cursor:pointer; transition: color 0.15s ease, border-color 0.15s ease; }
+  .view-toggle-btn:hover { color: var(--text); border-color: var(--text-faint); }
+
+  .undo-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); display:flex; align-items:center; gap: 12px; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text); padding: 11px 14px; border-radius: 10px; font-size: 13.5px; box-shadow: 0 12px 30px rgba(0,0,0,0.35); z-index: 65; animation: slideDown 0.2s ease; }
+  .undo-btn { background: none; border: none; color: var(--accent); font-weight: 600; font-size: 13.5px; cursor: pointer; font-family: ${SANS}; }
+  .undo-btn:hover { text-decoration: underline; }
+
+  .calendar-wrap { display:flex; gap: 20px; flex-wrap: wrap; align-items:flex-start; }
+  .calendar-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; width: 320px; flex-shrink: 0; }
+  .calendar-head { display:flex; align-items:center; justify-content:space-between; margin-bottom: 10px; }
+  .calendar-month { font-family: ${SERIF}; font-size: 15px; color: var(--text); }
+  .calendar-grid { display:grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .calendar-weekdays { margin-bottom: 4px; }
+  .calendar-weekday { text-align:center; font-size: 11px; color: var(--text-faint); padding: 4px 0; }
+  .calendar-cell { position:relative; aspect-ratio: 1; border-radius: 8px; background: none; border: 1px solid transparent; color: var(--text-dim); display:flex; flex-direction:column; align-items:center; justify-content:center; gap: 2px; cursor:pointer; font-size: 12.5px; font-family: ${SANS}; transition: background-color 0.15s ease, border-color 0.15s ease; }
+  .calendar-cell:hover { background: var(--surface-hover); }
+  .calendar-cell-empty { cursor:default; pointer-events:none; }
+  .calendar-cell-today .calendar-daynum { color: var(--accent); font-weight: 700; }
+  .calendar-cell-selected { border-color: var(--accent); background: var(--accent-soft); }
+  .calendar-dot { font-size: 9.5px; font-weight: 700; color: var(--bg); background: var(--accent); border-radius: 999px; padding: 0 4px; min-width: 14px; line-height: 1.4; }
+  .calendar-dot-over { background: var(--red); }
+  .calendar-day-list { flex: 1; min-width: 260px; }
+
+  .stat-row { display:flex; align-items:center; gap: 10px; }
+  .stat-bar { flex:1; height: 8px; border-radius: 999px; background: var(--surface); overflow:hidden; }
+  .stat-bar-fill { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.3s ease; }
+  .stat-num { font-size: 12.5px; font-weight: 600; color: var(--text-dim); width: 36px; text-align:right; }
+  .stat-subject-list { display:flex; flex-direction:column; gap: 8px; }
+  .stat-subject-row { display:flex; align-items:center; gap: 8px; }
+  .stat-subject-name { font-size: 12.5px; color: var(--text-dim); width: 100px; flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .stat-bar-sm { height: 6px; }
+  .stat-num-sm { font-size: 11.5px; color: var(--text-faint); width: 40px; text-align:right; flex-shrink:0; }
+
   @keyframes scrimIn {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -1236,5 +1580,8 @@ const CSS = `
     .menu-btn { display:flex; }
     .main { padding: 18px 16px 30px; }
     .topbar h1 { font-size: 21px; }
+    .calendar-wrap { flex-direction: column; }
+    .calendar-card { width: 100%; }
+    .calendar-day-list { min-width: 0; width: 100%; }
   }
 `;
