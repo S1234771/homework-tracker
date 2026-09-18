@@ -5,7 +5,7 @@ import { db, auth, googleProvider } from "./firebase";
 import {
   Search, Plus, Star, Link2, Calendar, Circle, Clock, CheckCheck,
   Trash2, Pencil, X, Check, BookOpen, Menu, AlertCircle, LogOut,
-  FileText, Paperclip, Bell
+  FileText, Paperclip, Bell, Sun, Moon
 } from "lucide-react";
 
 // Сжимает выбранное фото и превращает в data URL, чтобы хранить
@@ -74,6 +74,21 @@ function formatDate(dateStr) {
 }
 
 export default function App() {
+  const [theme, setTheme] = useState(() => {
+    try {
+      return localStorage.getItem("hw-theme") || "dark";
+    } catch (e) {
+      return "dark";
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("hw-theme", theme);
+    } catch (e) {}
+  }, [theme]);
+  const toggleTheme = () => setTheme((t) => (t === "dark" ? "light" : "dark"));
+  const themeVars = getThemeVars(theme);
+
   const [authChecked, setAuthChecked] = useState(false);
   const [user, setUser] = useState(null);
   const [authError, setAuthError] = useState(null);
@@ -256,7 +271,8 @@ export default function App() {
 
   if (!authChecked) {
     return (
-      <div style={{ ...styleVars, background: "var(--bg)", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontFamily: SANS }}>
+      <div style={{ ...themeVars, background: "var(--bg)", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontFamily: SANS }}>
+        <style>{CSS}</style>
         Загружаю…
       </div>
     );
@@ -264,8 +280,11 @@ export default function App() {
 
   if (!user) {
     return (
-      <div style={styleVars} className="login-screen">
+      <div style={themeVars} className="login-screen">
         <style>{CSS}</style>
+        <button className="theme-toggle-btn" onClick={toggleTheme} title="Сменить тему">
+          {theme === "dark" ? <Sun size={16} strokeWidth={1.75} /> : <Moon size={16} strokeWidth={1.75} />}
+        </button>
         <div className="login-card">
           <BookOpen size={30} strokeWidth={1.5} />
           <h1>Дневник заданий</h1>
@@ -285,15 +304,19 @@ export default function App() {
 
   if (!loaded) {
     return (
-      <div style={{ ...styleVars, background: "var(--bg)", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontFamily: SANS }}>
+      <div style={{ ...themeVars, background: "var(--bg)", height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text-dim)", fontFamily: SANS }}>
+        <style>{CSS}</style>
         Загружаю данные…
       </div>
     );
   }
 
   return (
-    <div className="app" style={styleVars}>
+    <div className="app" style={themeVars}>
       <style>{CSS}</style>
+      <button className="theme-toggle-btn" onClick={toggleTheme} title="Сменить тему">
+        {theme === "dark" ? <Sun size={16} strokeWidth={1.75} /> : <Moon size={16} strokeWidth={1.75} />}
+      </button>
 
       {sidebarOpen && <div className="scrim" onClick={() => setSidebarOpen(false)} />}
 
@@ -991,7 +1014,7 @@ function TaskForm({ task, subjects, onClose, onSave }) {
 const SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
 const SERIF = "Georgia, 'Iowan Old Style', 'Palatino Linotype', serif";
 
-const styleVars = {
+const darkVars = {
   "--bg": "#14161c",
   "--bg-elevated": "#1a1d24",
   "--surface": "#1f232c",
@@ -1008,10 +1031,34 @@ const styleVars = {
   "--grey": "#6b7280",
 };
 
+const lightVars = {
+  "--bg": "#f6f2ea",
+  "--bg-elevated": "#ffffff",
+  "--surface": "#ffffff",
+  "--surface-hover": "#f0ead9",
+  "--border": "#e4dcc8",
+  "--text": "#2b2620",
+  "--text-dim": "#6e6656",
+  "--text-faint": "#a39a86",
+  "--accent": "#b8752e",
+  "--accent-soft": "rgba(184,117,46,0.13)",
+  "--green": "#4f9370",
+  "--blue": "#4a72a8",
+  "--red": "#b8483f",
+  "--grey": "#8b8272",
+};
+
+function getThemeVars(theme) {
+  return theme === "light" ? lightVars : darkVars;
+}
+
 const CSS = `
   * { box-sizing: border-box; }
-  .app { display: flex; height: 100vh; background: var(--bg); color: var(--text); font-family: ${SANS}; font-size: 15px; }
+  .app { display: flex; height: 100vh; background: var(--bg); color: var(--text); font-family: ${SANS}; font-size: 15px; transition: background-color 0.2s ease, color 0.2s ease; }
   .scrim { display:none; }
+
+  .theme-toggle-btn { position: fixed; top: 16px; right: 16px; z-index: 70; width: 36px; height: 36px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border); color: var(--text-dim); display:flex; align-items:center; justify-content:center; cursor:pointer; transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease; }
+  .theme-toggle-btn:hover { color: var(--accent); border-color: var(--accent); transform: rotate(15deg); }
 
   .sidebar { width: 270px; flex-shrink: 0; background: var(--bg-elevated); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px 14px; overflow-y: auto; }
   .brand { display:flex; align-items:center; gap:8px; font-family: ${SERIF}; font-size: 20px; color: var(--text); margin-bottom: 18px; padding: 0 4px; }
