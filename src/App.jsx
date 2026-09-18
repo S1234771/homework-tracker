@@ -91,6 +91,7 @@ export default function App() {
   const [showSubjectForm, setShowSubjectForm] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [viewingTask, setViewingTask] = useState(null);
+  const [previewImage, setPreviewImage] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [deadlineBanner, setDeadlineBanner] = useState([]);
   const notifiedRef = useRef(false);
@@ -485,27 +486,38 @@ export default function App() {
 
                 {t.attachments?.length > 0 && (
                   <div className="attachments">
-                    {t.attachments.map((a) => (
-                      <a
-                        key={a.id}
-                        href={a.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        download={a.type === "file" ? (a.label || "файл") : undefined}
-                        className="attachment-chip"
-                        title={a.label || (a.type === "link" ? a.url : "")}
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {a.type === "image" ? (
+                    {t.attachments.map((a) =>
+                      a.type === "image" ? (
+                        <button
+                          key={a.id}
+                          type="button"
+                          className="attachment-chip"
+                          title={a.label || "Фото"}
+                          onClick={(e) => { e.stopPropagation(); setPreviewImage(a); }}
+                        >
                           <img src={a.url} alt="" className="attachment-thumb" />
-                        ) : a.type === "file" ? (
-                          <FileText size={12} strokeWidth={1.75} />
-                        ) : (
-                          <Link2 size={12} strokeWidth={1.75} />
-                        )}
-                        {a.label || (a.type === "image" ? "Фото" : a.type === "file" ? "Файл" : "Ссылка")}
-                      </a>
-                    ))}
+                          {a.label || "Фото"}
+                        </button>
+                      ) : (
+                        <a
+                          key={a.id}
+                          href={a.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          download={a.type === "file" ? (a.label || "файл") : undefined}
+                          className="attachment-chip"
+                          title={a.label || (a.type === "link" ? a.url : "")}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {a.type === "file" ? (
+                            <FileText size={12} strokeWidth={1.75} />
+                          ) : (
+                            <Link2 size={12} strokeWidth={1.75} />
+                          )}
+                          {a.label || (a.type === "file" ? "Файл" : "Ссылка")}
+                        </a>
+                      )
+                    )}
                   </div>
                 )}
 
@@ -569,7 +581,23 @@ export default function App() {
             setViewingTask(null);
           }}
           onStatusChange={(status) => setTaskStatus(viewingTask.id, status)}
+          onPreviewImage={setPreviewImage}
         />
+      )}
+
+      {previewImage && (
+        <div className="lightbox-scrim" onClick={() => setPreviewImage(null)}>
+          <button className="lightbox-close" onClick={() => setPreviewImage(null)}>
+            <X size={20} strokeWidth={2} />
+          </button>
+          <img
+            src={previewImage.url}
+            alt={previewImage.label || ""}
+            className="lightbox-img"
+            onClick={(e) => e.stopPropagation()}
+          />
+          {previewImage.label && <div className="lightbox-caption">{previewImage.label}</div>}
+        </div>
       )}
 
       {editingTask && (
@@ -662,7 +690,7 @@ function SubjectForm({ onClose, onSave }) {
   );
 }
 
-function TaskDetail({ task, subject, onClose, onEdit, onStatusChange }) {
+function TaskDetail({ task, subject, onClose, onEdit, onStatusChange, onPreviewImage }) {
   const st = statusOf(task.status);
   const images = (task.attachments || []).filter((a) => a.type === "image");
   const files = (task.attachments || []).filter((a) => a.type !== "image");
@@ -708,9 +736,9 @@ function TaskDetail({ task, subject, onClose, onEdit, onStatusChange }) {
             <label className="field-label">Фото</label>
             <div className="detail-gallery">
               {images.map((a) => (
-                <a key={a.id} href={a.url} target="_blank" rel="noreferrer" className="detail-photo">
+                <button key={a.id} type="button" className="detail-photo" onClick={() => onPreviewImage(a)}>
                   <img src={a.url} alt={a.label || ""} />
-                </a>
+                </button>
               ))}
             </div>
           </>
@@ -1058,7 +1086,7 @@ const CSS = `
   .task-desc { font-size: 14px; color: var(--text-faint); margin: 0 0 12px; line-height: 1.55; }
 
   .attachments { display:flex; flex-wrap:wrap; gap:6px; margin-bottom: 10px; }
-  .attachment-chip { display:inline-flex; align-items:center; gap:5px; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim); font-size: 12px; padding: 4px 9px 4px 5px; border-radius: 7px; text-decoration:none; transition: color 0.15s ease, border-color 0.15s ease; }
+  .attachment-chip { display:inline-flex; align-items:center; gap:5px; background: var(--bg-elevated); border: 1px solid var(--border); color: var(--text-dim); font-size: 12px; font-family: ${SANS}; padding: 4px 9px 4px 5px; border-radius: 7px; text-decoration:none; cursor:pointer; transition: color 0.15s ease, border-color 0.15s ease; }
   .attachment-chip:hover { color: var(--text); border-color: var(--text-faint); }
   .attachment-chip.removable { cursor: default; }
   .attachment-chip svg:last-child { cursor: pointer; margin-left: 2px; }
@@ -1124,7 +1152,7 @@ const CSS = `
   .detail-deadline { display:flex; align-items:center; gap:6px; font-size: 13px; color: var(--text-faint); margin-bottom: 10px; }
   .detail-desc { font-size: 14.5px; color: var(--text-dim); line-height: 1.6; white-space: pre-wrap; margin: 4px 0 16px; }
   .detail-gallery { display:flex; flex-wrap:wrap; gap: 10px; margin: 8px 0 16px; }
-  .detail-photo { display:block; width: 96px; height: 96px; border-radius: 10px; overflow:hidden; border: 1px solid var(--border); transition: transform 0.15s ease, border-color 0.15s ease; }
+  .detail-photo { display:block; width: 96px; height: 96px; border-radius: 10px; overflow:hidden; border: 1px solid var(--border); background: none; padding: 0; cursor: pointer; transition: transform 0.15s ease, border-color 0.15s ease; }
   .detail-photo:hover { transform: scale(1.03); border-color: var(--accent); }
   .detail-photo img { width: 100%; height: 100%; object-fit: cover; display:block; }
   .detail-files { display:flex; flex-direction:column; gap: 6px; margin: 8px 0 6px; }
@@ -1139,6 +1167,12 @@ const CSS = `
     from { opacity: 0; transform: translateY(10px) scale(0.97); }
     to { opacity: 1; transform: translateY(0) scale(1); }
   }
+  .lightbox-scrim { position: fixed; inset: 0; background: rgba(6,7,10,0.88); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index: 60; padding: 40px 20px; animation: scrimIn 0.15s ease; cursor: zoom-out; }
+  .lightbox-img { max-width: 100%; max-height: 80vh; border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); cursor: default; animation: modalIn 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+  .lightbox-caption { color: var(--text-dim); font-size: 13px; margin-top: 14px; }
+  .lightbox-close { position: absolute; top: 20px; right: 24px; background: var(--surface); border: 1px solid var(--border); color: var(--text); width: 36px; height: 36px; border-radius: 50%; display:flex; align-items:center; justify-content:center; cursor:pointer; transition: border-color 0.15s ease; }
+  .lightbox-close:hover { border-color: var(--text-faint); }
+
   @keyframes scrimIn {
     from { opacity: 0; }
     to { opacity: 1; }
